@@ -1,11 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Archivo, Noto_Kufi_Arabic, IBM_Plex_Sans_Arabic } from "next/font/google";
 import "./globals.css";
-import { CartProvider } from "@/context/cart-context";
-import { Header } from "@/components/layout/Header";
-import { Footer } from "@/components/layout/Footer";
-import { CartDrawer } from "@/components/layout/CartDrawer";
-import { getProducts } from "@/lib/data/catalog";
 
 /** Latin — one grotesque, at 400/500 only. The compressed 800 cut that
  *  made everything look like a sports poster is gone. */
@@ -42,29 +37,21 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = { themeColor: "#151713" };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // one catalogue fetch per request, shared by the header's search
-  const products = await getProducts();
-
+/**
+ * The only root layout: html, body and the three typefaces.
+ *
+ * The public chrome (header, footer, cart) lives in (site)/layout.tsx so
+ * that /admin can render a completely different interface underneath the
+ * same fonts without the shop navigation on top of it. Neither group can
+ * affect the other's markup.
+ */
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
       className={`${archivo.variable} ${plexArabic.variable} ${kufi.variable}`}
     >
-      <body>
-        <CartProvider>
-          <a
-            href="#main"
-            className="t-ui sr-only focus:not-sr-only focus:absolute focus:start-4 focus:top-4 focus:z-200 focus:bg-cream focus:px-4 focus:py-2 focus:text-char"
-          >
-            Skip to content
-          </a>
-          <Header products={products} />
-          <main id="main">{children}</main>
-          <Footer />
-          <CartDrawer />
-        </CartProvider>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

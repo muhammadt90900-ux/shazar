@@ -11,7 +11,7 @@
 export type ProductStatus = "draft" | "active" | "archived";
 export type CollectionStatus = "draft" | "active" | "archived";
 
-export interface ProductRow {
+export type ProductRow = {
   id: string;
   slug: string;
   name_en: string;
@@ -31,9 +31,9 @@ export interface ProductRow {
   is_new: boolean;
   created_at: string;
   updated_at: string;
-}
+};
 
-export interface ProductImageRow {
+export type ProductImageRow = {
   id: string;
   product_id: string;
   storage_path: string;
@@ -42,9 +42,9 @@ export interface ProductImageRow {
   sort_order: number;
   is_primary: boolean;
   created_at: string;
-}
+};
 
-export interface ProductVariantRow {
+export type ProductVariantRow = {
   id: string;
   product_id: string;
   size: string | null;
@@ -55,9 +55,9 @@ export interface ProductVariantRow {
   stock_quantity: number;
   created_at: string;
   updated_at: string;
-}
+};
 
-export interface CollectionRow {
+export type CollectionRow = {
   id: string;
   slug: string;
   name_en: string;
@@ -70,56 +70,77 @@ export interface CollectionRow {
   sort_order: number;
   created_at: string;
   updated_at: string;
-}
+};
 
-export interface CollectionProductRow {
+export type CollectionProductRow = {
   collection_id: string;
   product_id: string;
   sort_order: number;
-}
+};
 
-export interface ProfileRow {
+export type ProfileRow = {
   id: string;
   role: "customer" | "admin";
   created_at: string;
   updated_at: string;
-}
+};
 
 /** A product joined with everything a page needs, in one round trip. */
-export interface ProductWithRelations extends ProductRow {
+export type ProductWithRelations = ProductRow & {
   product_images: ProductImageRow[];
   product_variants: ProductVariantRow[];
   collection_products: { collection_id: string; collections: { slug: string } | null }[];
-}
+};
 
 export interface Database {
   public: {
     Tables: {
-      products: { Row: ProductRow; Insert: Partial<ProductRow>; Update: Partial<ProductRow> };
+      products: {
+        Row: ProductRow;
+        Insert: Partial<ProductRow>;
+        Update: Partial<ProductRow>;
+        Relationships: [];
+      };
       product_images: {
         Row: ProductImageRow;
         Insert: Partial<ProductImageRow>;
         Update: Partial<ProductImageRow>;
+        Relationships: [];
       };
       product_variants: {
         Row: ProductVariantRow;
         Insert: Partial<ProductVariantRow>;
         Update: Partial<ProductVariantRow>;
+        Relationships: [];
       };
       collections: {
         Row: CollectionRow;
         Insert: Partial<CollectionRow>;
         Update: Partial<CollectionRow>;
+        Relationships: [];
       };
       collection_products: {
         Row: CollectionProductRow;
         Insert: Partial<CollectionProductRow>;
         Update: Partial<CollectionProductRow>;
+        Relationships: [];
       };
-      profiles: { Row: ProfileRow; Insert: Partial<ProfileRow>; Update: Partial<ProfileRow> };
+      profiles: {
+        Row: ProfileRow;
+        Insert: Partial<ProfileRow>;
+        Update: Partial<ProfileRow>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
-    Functions: { is_admin: { Args: Record<string, never>; Returns: boolean } };
+    Functions: {
+      is_admin: { Args: Record<string, never>; Returns: boolean };
+      /** Added in 0005 — swaps the primary image in one statement. */
+      set_primary_product_image: {
+        Args: { p_product_id: string; p_image_id: string };
+        Returns: undefined;
+      };
+    };
     Enums: { product_status: ProductStatus; collection_status: CollectionStatus };
     CompositeTypes: Record<string, never>;
   };
