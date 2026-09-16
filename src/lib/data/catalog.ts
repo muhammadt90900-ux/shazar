@@ -129,10 +129,78 @@ function toCollection(row: CollectionRow): Collection {
   };
 }
 
-/** Raw database errors never reach a visitor — they go to the server log
- *  and the page falls back to the local catalogue. */
+/**
+ * Raw database errors never reach a visitor — they go to the server log
+ * and the page falls back to the local catalogue.
+ *
+ * A Supabase PostgrestError is a plain object whose fields are not all
+ * own-enumerable, so `console.error(err)` prints `{}` and tells you
+ * nothing. Everything useful is pulled out by hand here instead.
+ */
+function describeError(error: unknown): string {
+  if (!error) return "unknown error";
+
+  if (typeof error === "object") {
+    const e = error as {
+      message?: string;
+      code?: string;
+      details?: string;
+      hint?: string;
+      name?: string;
+      cause?: unknown;
+    };
+    const parts = [
+      e.code ? `code=${e.code}` : null,
+      e.message ? `message=${e.message}` : null,
+      e.details ? `details=${e.details}` : null,
+      e.hint ? `hint=${e.hint}` : null,
+      e.name && !e.message ? `name=${e.name}` : null,
+      e.cause ? `cause=${String(e.cause)}` : null,
+    ].filter(Boolean);
+    if (parts.length) return parts.join(" | ");
+
+    try {
+      return JSON.stringify(error, Object.getOwnPropertyNames(error));
+    } catch {
+      return String(error);
+    }
+  }
+
+  return String(error);
+}
+
+/** The common failures, translated into what to actually do about them. */
+function diagnose(error: unknown): string | null {
+  const e = error as { code?: string; message?: string } | null;
+  const code = e?.code ?? "";
+  const message = (e?.message ?? "").toLowerCase();
+
+  if (code === "42P01" || message.includes("does not exist")) {
+    return "The tables are missing — run the migrations in supabase/migrations/ in order.";
+  }
+  if (code === "42501" || message.includes("permission denied")) {
+    return "The anon role cannot read the tables. Check that 0002_rls_policies.sql ran.";
+  }
+  if (code === "PGRST205" || message.includes("schema cache")) {
+    return "PostgREST has not picked up the new tables yet. In the dashboard: Settings -> API -> Reload schema cache, or wait a minute.";
+  }
+  if (code === "PGRST200" || message.includes("relationship")) {
+    return "A foreign key the query relies on is missing — 0001_initial_schema.sql may have partially failed.";
+  }
+  if (message.includes("fetch failed") || message.includes("enotfound")) {
+    return "Could not reach Supabase at all. Check NEXT_PUBLIC_SUPABASE_URL and your connection.";
+  }
+  if (code === "401" || message.includes("invalid api key") || message.includes("jwt")) {
+    return "The key is being rejected. Check NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, then restart the dev server.";
+  }
+  return null;
+}
+
 function reportAndFallback<T>(scope: string, error: unknown, fallback: T): T {
-  console.error(`[catalog] ${scope} failed, serving local catalogue:`, error);
+  console.error(`[catalog] ${scope} failed — ${describeError(error)}`);
+  const advice = diagnose(error);
+  if (advice) console.error(`[catalog] ${advice}`);
+  console.error("[catalog] serving the local catalogue instead.");
   return fallback;
 }
 

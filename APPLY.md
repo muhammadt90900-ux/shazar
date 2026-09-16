@@ -1,39 +1,51 @@
-# SHAZAR — Instagram handle fix
+# SHAZAR — "two parallel pages that resolve to the same path"
 
-Three files. Copy `src/` over your project.
+No code is wrong. You have two copies of every public page.
 
-    src/data/instagram.ts                 the handle, now in one place
-    src/components/home/InstagramGrid.tsx reads it instead of hardcoding
-    src/app/(site)/contact/page.tsx       same
+## What happened
 
-## What was wrong
+Phase 3 moved the public pages into a route group:
 
-I had `@shazar`. The account is **`_sharazaa`**.
+    src/app/product/[slug]/page.tsx   ->   src/app/(site)/product/[slug]/page.tsx
 
-It survived three phases because the handle was written out by hand in
-three places — the URL in `instagram.ts`, and the visible `@shazar` text
-typed again in the feed section and on the contact page. Changing one
-would not have changed the others.
+Copying `src/` over your project **adds** the new files but cannot
+**remove** the old ones. So both exist, both claim `/product/[slug]`,
+and Next.js refuses to guess.
 
-It is now derived from a single constant:
+Route groups do not appear in URLs — `(site)` is invisible to visitors.
+The URLs are unchanged.
 
-    export const INSTAGRAM_HANDLE = "_sharazaa";
-    export const INSTAGRAM_URL = `https://instagram.com/${INSTAGRAM_HANDLE}`;
+## Fix — delete the old copies
 
-The printed text and the link are built from the same value, so they
-cannot disagree again.
+Run `cleanup-duplicate-routes.ps1` from the project root (the folder
+with `package.json`):
 
-## Two things still wrong, which I did not invent values for
+    powershell -ExecutionPolicy Bypass -File .\cleanup-duplicate-routes.ps1
 
-    WHATSAPP_NUMBER = "9647700000000"   placeholder
-    CONTACT_EMAIL   = "hello@shazar.com" placeholder
+Or delete these by hand — the folders and files directly under
+`src\app\`, **not** the ones inside `src\app\(site)\`:
 
-Both are in `src/data/instagram.ts` with a TODO. They appear on the
-contact page, in the footer and in the mobile menu. Send me the real
-number and address, or edit those two lines.
+    src\app\page.tsx
+    src\app\not-found.tsx
+    src\app\shop\
+    src\app\collections\
+    src\app\product\
+    src\app\story\
+    src\app\kurdish\
+    src\app\kurdistan\      (if present — removed back in phase 3)
+    src\app\contact\
 
-## One question
+## What should be left in src\app
 
-Your bio says "Founder of SHAZAR.brand". `_sharazaa` is your personal
-account. If the brand has its own account, the site should link to that
-one instead — tell me the handle and it is a one-line change.
+    (site)\        the public site
+    admin\         the dashboard
+    globals.css
+    icon.tsx
+    layout.tsx
+
+Five entries. If you see `shop` or `product` sitting next to `(site)`,
+the duplicate is still there.
+
+Then:
+
+    npm run dev

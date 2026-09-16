@@ -3,7 +3,7 @@ import "server-only";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getAdminSession, isSignedInNonAdmin, type AdminSession } from "@/lib/auth/admin";
-import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { isSupabaseConfigured, supabaseConfigProblem } from "@/lib/supabase/env";
 
 /**
  * The gate every admin page goes through.
@@ -25,6 +25,11 @@ export async function requireAdminPage(): Promise<AdminSession | { deny: React.R
               <code>.env.local</code>, fill in the project URL and publishable key, then
               restart the dev server. The public site keeps working without it.
             </p>
+            {supabaseConfigProblem && (
+              <p className="admin-flash" data-tone="error">
+                {supabaseConfigProblem}
+              </p>
+            )}
             <p>
               <Link href="/" className="admin-btn">
                 Back to the site
