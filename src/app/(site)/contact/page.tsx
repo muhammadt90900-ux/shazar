@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
 import { Container } from "@/components/ui/Container";
-import { INSTAGRAM_URL, WHATSAPP_URL, CONTACT_EMAIL } from "@/data/instagram";
+import {
+  INSTAGRAM_HANDLE,
+  INSTAGRAM_URL,
+  WHATSAPP_NUMBER,
+  WHATSAPP_URL,
+  CONTACT_EMAIL,
+} from "@/data/instagram";
 
 export const metadata: Metadata = { title: "Contact" };
 
@@ -10,14 +16,14 @@ const CHANNELS = [
     ku: "خێراترین ڕێگا",
     detail: "Orders, sizing, anything urgent. Usually answered the same day.",
     href: WHATSAPP_URL,
-    value: "+964 770 000 0000",
+    value: `+${WHATSAPP_NUMBER}`,
   },
   {
     label: "Instagram",
     ku: "ئینستاگرام",
     detail: "New drops first, and the campaign photography in full.",
     href: INSTAGRAM_URL,
-    value: "@shazar",
+    value: `@${INSTAGRAM_HANDLE}`,
   },
   {
     label: "Email",

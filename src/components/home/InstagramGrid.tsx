@@ -2,7 +2,7 @@ import { Container } from "@/components/ui/Container";
 import { ArtImage } from "@/components/media/ArtImage";
 import { Reveal } from "@/components/motion/Reveal";
 import { feedFrame } from "@/data/images";
-import { instagramPosts, INSTAGRAM_URL } from "@/data/instagram";
+import { instagramPosts, INSTAGRAM_HANDLE, INSTAGRAM_URL } from "@/data/instagram";
 
 /**
  * A real feed has mixed crops. One frame spans two rows so the grid has
@@ -13,7 +13,7 @@ export function InstagramGrid() {
     <section className="bg-loam">
       <Container className="py-20 lg:py-28">
         <div className="mb-8 flex items-baseline justify-between">
-          <p className="t-ui text-ash">@shazar</p>
+          <p className="t-ui text-ash">@{INSTAGRAM_HANDLE}</p>
           <a href={INSTAGRAM_URL} className="t-ui border-b border-current pb-1 hover:text-dust">
             Follow
           </a>
