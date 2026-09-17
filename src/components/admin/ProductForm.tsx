@@ -173,6 +173,26 @@ export function ProductForm({ product }: { product?: ProductRow }) {
         </div>
       </div>
 
+      <h2>Stock without variants</h2>
+      <div className="admin-cols">
+        <div className="admin-field">
+          <label htmlFor="stock_quantity">Stock (units)</label>
+          <input
+            id="stock_quantity"
+            name="stock_quantity"
+            type="text"
+            inputMode="numeric"
+            defaultValue={product?.stock_quantity ?? 0}
+          />
+          <input type="hidden" name="stock_quantity_was" value={product ? String(product.stock_quantity ?? 0) : ""} />
+          <FieldError error={e.stock_quantity} />
+          <p className="admin-label">
+            Only used while this product has no variants. Once it has sizes or colours, stock is
+            set per variant below and this number is ignored.
+          </p>
+        </div>
+      </div>
+
       <h2>Status</h2>
       <div className="admin-cols">
         <div className="admin-field">

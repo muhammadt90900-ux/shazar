@@ -8,6 +8,7 @@ import { Price } from "@/components/ui/Price";
 import { SizeSelector } from "@/components/ui/SizeSelector";
 import { useCart } from "@/context/cart-context";
 import type { Product, SizeKey } from "@/lib/types";
+import { copy } from "@/lib/checkout/copy";
 
 const SIZE_TABLE = [
   { size: "XS", chest: "96", length: "68" },
@@ -19,21 +20,55 @@ const SIZE_TABLE = [
 ];
 
 export function ProductInfo({ product }: { product: Product }) {
-  const { add } = useCart();
+  const { add, quantityOf } = useCart();
   const [size, setSize] = useState<SizeKey | null>(
     product.sizes.length === 1 && product.sizes[0].inStock ? product.sizes[0].label : null,
   );
-  const [color, setColor] = useState(product.colors[0].name);
+  const [color, setColor] = useState<string | null>(product.colors[0]?.name ?? null);
   const [added, setAdded] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const soldOut = product.sizes.every((s) => !s.inStock);
+  // undefined = local catalogue (stock not tracked); [] = sells without
+  // variants, from product.stock
+  const variants = product.variants;
+  const hasVariants = Boolean(variants?.length);
+  const needsSize = product.sizes.length > 0;
+
+  const variant = hasVariants
+    ? (variants!.find((v) => (v.size ?? null) === size && (v.color ?? null) === color) ?? null)
+    : null;
+  const stock: number | null =
+    variants === undefined ? null : hasVariants ? (variant?.stock ?? 0) : (product.stock ?? 0);
+  const inBag = quantityOf(product.id ?? product.slug, variant?.id ?? null);
+
+  const soldOut =
+    variants === undefined
+      ? product.sizes.length > 0 && product.sizes.every((s) => !s.inStock)
+      : hasVariants
+        ? variants!.every((v) => v.stock <= 0)
+        : (product.stock ?? 0) <= 0;
+
+  const chosen = !needsSize || Boolean(size);
+  const comboSoldOut = chosen && stock !== null && stock <= 0;
+  const bagFull = chosen && stock !== null && stock > 0 && inBag >= stock;
 
   function handleAdd() {
-    if (!size) return;
-    add(product, size, color);
+    if (!chosen) return;
+    const result = add(product, size, color);
+    if (!result.ok) {
+      setNotice(
+        result.reason === "max_reached"
+          ? copy.bag.maxReached(result.available).en
+          : copy.bag.soldOutCombo.en,
+      );
+      return;
+    }
+    setNotice(null);
     setAdded(true);
     setTimeout(() => setAdded(false), 1600);
   }
+
+  const canAdd = chosen && !soldOut && !comboSoldOut && !bagFull;
 
   return (
     <div className="lg:sticky lg:top-[calc(var(--header-h)+40px)]">
@@ -54,28 +89,62 @@ export function ProductInfo({ product }: { product: Product }) {
         {product.description}
       </p>
 
-      <div className="mt-8">
-        <p className="mb-3 t-ui text-char/55">Colour — {color}</p>
-        <ColorSwatch colors={product.colors} value={color} onChange={setColor} />
-      </div>
+      {product.colors.length > 0 && (
+        <div className="mt-8">
+          <p className="mb-3 t-ui text-char/55">Colour — {color}</p>
+          <ColorSwatch
+            colors={product.colors}
+            value={color ?? product.colors[0].name}
+            onChange={(c) => {
+              setColor(c);
+              setNotice(null);
+            }}
+          />
+        </div>
+      )}
 
-      <div className="mt-8">
-        <p className="mb-3 t-ui text-char/55">
-          Size{size ? ` — ${size}` : ""}
-        </p>
-        <SizeSelector sizes={product.sizes} value={size} onChange={setSize} />
-      </div>
+      {needsSize && (
+        <div className="mt-8">
+          <p className="mb-3 t-ui text-char/55">
+            Size{size ? ` — ${size}` : ""}
+          </p>
+          <SizeSelector
+            sizes={product.sizes}
+            value={size}
+            onChange={(s) => {
+              setSize(s);
+              setNotice(null);
+            }}
+          />
+        </div>
+      )}
 
       <Button
-        variant={size && !soldOut ? "solid" : "outline"}
+        variant={canAdd ? "solid" : "outline"}
         onClick={handleAdd}
-        disabled={soldOut || !size}
-        ku={size && !soldOut ? "زیادی بکە" : undefined}
+        disabled={!canAdd}
+        ku={canAdd ? "زیادی بکە" : undefined}
         className="mt-8 w-full sm:w-auto sm:min-w-[280px]"
       >
-        {soldOut ? "Sold out" : added ? "Added" : size ? "Add to bag" : "Choose a size"}
+        {soldOut
+          ? "Sold out"
+          : !chosen
+            ? "Choose a size"
+            : comboSoldOut
+              ? copy.bag.soldOutCombo.en
+              : bagFull
+                ? "All available are in your bag"
+                : added
+                  ? "Added"
+                  : "Add to bag"}
       </Button>
-      <p className="t-meta mt-3 text-char/55">Demo only — this prototype has no checkout.</p>
+      {(notice || bagFull) && stock !== null ? (
+        <p role="status" className="t-meta mt-3 text-char/70">
+          {notice ?? copy.bag.maxReached(stock).en}
+        </p>
+      ) : (
+        <p className="t-meta mt-3 text-char/55">{copy.bag.codNote.en}</p>
+      )}
 
       <div className="mt-12 border-t border-[var(--rule)]">
         <Accordion title="Details" defaultOpen>

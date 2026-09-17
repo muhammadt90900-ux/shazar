@@ -57,6 +57,10 @@ export interface ProductInput {
   status: ProductStatus;
   featured: boolean;
   is_new: boolean;
+  /** 0006 — used only while the product has no variants. Omitted when
+   *  the admin did not edit it, so a save cannot undo sales made while
+   *  the form was open. */
+  stock_quantity?: number;
 }
 
 export function validateProduct(form: FormData): Validated<ProductInput> {
@@ -91,6 +95,11 @@ export function validateProduct(form: FormData): Validated<ProductInput> {
     errors.compare_at_price_iqd = "A compare-at price should be higher than the price.";
   }
 
+  const stock = intOrNull(str(form, "stock_quantity"));
+  if (stock === "invalid" || (typeof stock === "number" && stock < 0)) {
+    errors.stock_quantity = "Stock must be a whole number, 0 or more.";
+  }
+
   const statusRaw = str(form, "status") as ProductStatus;
   const status = STATUSES.includes(statusRaw) ? statusRaw : "draft";
 
@@ -119,6 +128,9 @@ export function validateProduct(form: FormData): Validated<ProductInput> {
       status,
       featured: bool(form, "featured"),
       is_new: bool(form, "is_new"),
+      ...(str(form, "stock_quantity") !== str(form, "stock_quantity_was") && typeof stock === "number" && stock >= 0
+        ? { stock_quantity: stock }
+        : {}),
     },
   };
 }
@@ -131,6 +143,8 @@ export interface VariantInput {
   color_ku: string | null;
   sku: string | null;
   stock_quantity: number;
+  /** false when the admin left stock as it was loaded — see saveVariants */
+  stock_changed: boolean;
 }
 
 /**
@@ -147,6 +161,7 @@ export function validateVariants(form: FormData): Validated<VariantInput[]> {
   const kus = form.getAll("variant_color_ku").map(String);
   const skus = form.getAll("variant_sku").map(String);
   const stocks = form.getAll("variant_stock").map(String);
+  const stocksWas = form.getAll("variant_stock_was").map(String);
 
   const values: VariantInput[] = [];
   const seen = new Set<string>();
@@ -183,6 +198,8 @@ export function validateVariants(form: FormData): Validated<VariantInput[]> {
       color_ku: kus[i]?.trim() || null,
       sku: skus[i]?.trim() || null,
       stock_quantity: Number(stockRaw),
+      // a new row, or a number the admin actually edited
+      stock_changed: !ids[i] || (stocksWas[i] ?? "") !== stockRaw,
     });
   }
 
@@ -209,6 +226,11 @@ export function validateCollection(form: FormData): Validated<CollectionInput> {
 
   const slug = slugify(str(form, "slug") || name_en);
   if (!slug) errors.slug = "A slug is required.";
+
+  const stock = intOrNull(str(form, "stock_quantity"));
+  if (stock === "invalid" || (typeof stock === "number" && stock < 0)) {
+    errors.stock_quantity = "Stock must be a whole number, 0 or more.";
+  }
 
   const statusRaw = str(form, "status") as ProductStatus;
   const sortRaw = str(form, "sort_order");

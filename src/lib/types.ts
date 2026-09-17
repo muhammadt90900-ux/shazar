@@ -44,8 +44,11 @@ export interface Product {
   seed: number;
   isNew?: boolean;
   /** Present when the product came from the database. The cart stores a
-   *  variant id so checkout can hold stock against a real row later. */
+   *  variant id so checkout can hold stock against a real row. An empty
+   *  array means the product sells without variants, from `stock`. */
   variants?: ProductVariant[];
+  /** Product-level stock — meaningful only when `variants` is empty. */
+  stock?: number;
 }
 
 export interface Collection {
@@ -58,22 +61,34 @@ export interface Collection {
   seed: number;
 }
 
+/**
+ * One line in the bag. Persisted to localStorage, so it holds catalogue
+ * facts only — never anything about the customer.
+ *
+ * Identity is product + variant, never the name: the same hoodie in M and
+ * in L are two lines, and renaming a product does not merge or split them.
+ */
 export interface CartLine {
-  /** Line key: product + size + colour. */
+  /** `${productId}:${variantId ?? "-"}` */
   id: string;
-  /** Stable product identity — the database id where there is one. */
+  /** Database id; for the local catalogue, the slug. */
   productId: string;
   /** The exact variant, when the product has them. */
   variantId: string | null;
   slug: string;
   name: string;
-  /** Price snapshot in IQD, captured when the line was added. A price
-   *  change on the shelf must not silently rewrite somebody's bag. */
+  /** Display price in IQD. Refreshed from the database at checkout, and
+   *  never sent to the server as a price. */
   price: number;
-  size: SizeKey;
-  color: string;
+  size: SizeKey | null;
+  color: string | null;
+  sku: string | null;
+  image: string | null;
   seed: number;
   quantity: number;
+  /** Last known stock for this line; null when it is not tracked (the
+   *  local catalogue). A UX limit only — the database enforces the real one. */
+  maxStock: number | null;
 }
 
 export const CATEGORY_LABELS: Record<Category | "all", { en: string; ku: string }> = {

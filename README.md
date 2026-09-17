@@ -39,12 +39,18 @@ phase, and it must never carry a `NEXT_PUBLIC_` prefix.
 
 ## 3. Run the migrations
 
-Four files in `supabase/migrations/`, in order:
+Six files in `supabase/migrations/`, in order:
 
     0001_initial_schema.sql    tables, indexes, triggers, is_admin()
     0002_rls_policies.sql      row level security
     0003_storage.sql           the products bucket and its policies
     0004_seed_catalogue.sql    the twelve pieces the site already had
+    0005_admin_support.sql     admin indexes, primary-image switch
+    0006_orders.sql            orders, order items, checkout functions
+
+**Upgrading an existing project:** run `0006_orders.sql` once in the SQL
+Editor *before* deploying the phase 4 code — the admin product form and
+checkout both read columns it adds.
 
 **Easiest way** — Supabase dashboard → **SQL Editor** → paste each file
 in order → Run.
@@ -55,7 +61,7 @@ in order → Run.
     supabase link --project-ref <your-ref>
     supabase db push
 
-All four are idempotent: running them twice changes nothing.
+All six are idempotent: running them twice changes nothing.
 
 ## 4. Seed data
 
@@ -204,10 +210,15 @@ rewritten server-side; the browser's filename is never trusted.
 ### Variants
 
 A product can have none, sizes only, colours only, or both. A row needs
-a size or a colour to be saved; a product with no variants shows as
-*untracked* in the stock column rather than a false zero.
+a size or a colour to be saved.
 
-Stock is per variant. The dashboard flags any active product at or below
+Stock is per variant. A product with **no** variants uses the *Stock
+without variants* field on its form instead (`products.stock_quantity`,
+added in 0006). Exactly one of the two counts for any product.
+
+Saving the product or variant form only writes a stock number you
+actually changed. Orders take stock while a form is open; resaving the
+number it was loaded with would put sold pieces back on the shelf. The dashboard flags any active product at or below
 five units — the constant is `LOW_STOCK_THRESHOLD` in
 `src/lib/admin/queries.ts`.
 
@@ -223,11 +234,116 @@ Server Actions call `revalidatePath` for the affected public routes, so
 the site picks up a change on the next request. Caching is not disabled
 anywhere.
 
+## 8. Checkout and orders (phase 4)
+
+### The flow
+
+    product page → Add to bag → bag (localStorage) → /checkout
+      → quoteCart   (server: current prices + stock, display only)
+      → placeOrder  (server action → public.place_order, one transaction)
+      → /order/success/SHA-YYYYMMDD-NNNN
+      → /admin/orders
+
+Guests only — no customer account is needed or offered. The only
+payment method is **Cash on Delivery**; nothing is charged online.
+
+### The bag
+
+Stored in `localStorage` under `shazar.cart.v1`, so it survives refresh
+and closing the browser. It holds catalogue facts only — product id,
+variant id, quantity, name, image, display price, last known stock —
+never the customer's name, phone or address.
+
+A line is identified by `product_id + variant_id`. The same hoodie in M
+and in L are two lines. The + button stops at the stock the bag last
+saw; the database enforces the real limit.
+
+### Why the browser cannot set a price
+
+`placeOrder` sends only product ids, variant ids, quantities, the
+customer's details, an idempotency key and the total the customer was
+shown. `public.place_order` reads every price from `products`, computes
+the total itself in integer dinar, and uses the customer's total only to
+*compare*: if it differs (a price changed while the page was open), no
+order is created and the page refreshes its summary.
+
+### Order creation, all in one transaction
+
+1. validate customer fields and normalise the phone to `+9647XXXXXXXXX`
+2. lock the products, then the variants, in id order
+3. reject any line whose product is missing or not active, whose variant
+   is missing or belongs to another product, or whose stock is too low
+4. compute subtotal, shipping (0 for now) and total
+5. insert the order and its items with snapshots — name, SKU, size and
+   colour, unit price, line total, primary image path
+6. decrement stock with `where stock_quantity >= quantity`
+
+Any failure rolls back everything: no half-made order, no stock taken,
+and the bag is left intact. Because the rows are locked, two customers
+buying the last piece at the same moment cannot both succeed.
+
+### Double submission
+
+The checkout page creates an idempotency key per bag and keeps it in
+`sessionStorage`. A double tap, a refresh mid-submit or a retry after a
+dropped connection sends the same key, and `place_order` returns the
+order it already made instead of making another. The button is also
+disabled while submitting, but that is not what is relied on.
+
+### Statuses
+
+    order:    pending → confirmed → processing → shipped → delivered
+              any of those except delivered → cancelled
+    payment:  pending → paid          (failed is reserved for online payment)
+
+Every order starts `pending / pending / cash_on_delivery`. Delivering an
+order does **not** mark it paid — an admin marks it paid once the cash
+has actually been received.
+
+**Cancelling** returns the items' stock, once. `stock_restored_at` is set
+in the same locked transaction and checked first, so a second cancel
+returns nothing. A cancelled order cannot be reopened (its stock is gone
+back to the shelf) and cannot be marked paid; a delivered order cannot
+be cancelled.
+
+### Guest order privacy
+
+`orders` and `order_items` have RLS on, with a single policy: admins may
+read. Nobody — anonymous, signed-in customer or admin — has insert,
+update or delete rights on them; the three database functions are the
+only way in. Admins cannot read the checkout secrets either (withheld at
+column level).
+
+The order number is not a secret. What lets a customer see their order
+page is a 64-character access token, set at checkout as an **httpOnly
+cookie** scoped to `/order` for 30 days. The database stores only its
+hash. Opening `/order/success/SHA-…` on another device shows a polite
+"cannot be shown here" page and no order data. The customer page never
+shows the full phone number or the address.
+
+### Admin
+
+- `/admin` — order counts by status, and cash not yet received
+- `/admin/orders` — newest first, 25 per page; search by order number,
+  name or phone (as typed, e.g. `0750123`); filter by status, payment,
+  city and date range (Baghdad days)
+- `/admin/orders/[id]` — customer, address, notes, items with their
+  snapshot prices and images, totals, and the status / payment form
+
+### Environment variables
+
+No new ones. Phase 4 uses the same `NEXT_PUBLIC_SUPABASE_URL` and
+publishable key. **There is still no service-role key anywhere in the
+project** — the checkout functions run inside the database with exactly
+the rights they need.
+
 ## Project layout
 
     src/app/                routes
     src/components/         UI, unchanged by the database work
     src/lib/data/catalog.ts the one data-access boundary
+    src/lib/checkout/       cart limits, validation, copy, server actions
+    src/lib/admin/          admin queries, validation and actions
     src/lib/supabase/       env gate, server client, storage URLs
     src/types/database.ts   row shapes
     src/lib/types.ts        domain types the UI uses
@@ -237,5 +353,7 @@ anywhere.
 
 ## Not built yet
 
-Checkout, payment, orders, customer accounts. The cart is in memory and
-clears on refresh.
+Online payment (ZainCash, FastPay), shipping prices, customer accounts
+and order history, email/SMS notifications, coupons. Checkout needs
+Supabase: with the local catalogue only, `/checkout` says ordering is
+unavailable rather than pretending.

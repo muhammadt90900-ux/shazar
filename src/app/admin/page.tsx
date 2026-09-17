@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getStats, LOW_STOCK_THRESHOLD } from "@/lib/admin/queries";
+import { getOrderCounts, type OrderCounts } from "@/lib/admin/orders";
 import { requireAdminPage, isDenied } from "@/lib/admin/guard";
 import { AdminNav } from "@/components/admin/AdminNav";
 import { StatusPill } from "@/components/admin/Flash";
@@ -26,6 +27,29 @@ export default async function AdminDashboard() {
     );
   }
 
+  // Orders are read separately: if 0006 has not run yet, the catalogue
+  // dashboard still works and says so instead of failing whole.
+  let orders: OrderCounts | null = null;
+  let ordersError = false;
+  try {
+    orders = await getOrderCounts();
+  } catch {
+    ordersError = true;
+  }
+
+  const orderCards = orders
+    ? [
+        { label: "Total orders", value: orders.total, href: "/admin/orders" },
+        { label: "Pending", value: orders.pending, href: "/admin/orders?status=pending" },
+        { label: "Confirmed", value: orders.confirmed, href: "/admin/orders?status=confirmed" },
+        { label: "Processing", value: orders.processing, href: "/admin/orders?status=processing" },
+        { label: "Shipped", value: orders.shipped, href: "/admin/orders?status=shipped" },
+        { label: "Delivered", value: orders.delivered, href: "/admin/orders?status=delivered" },
+        { label: "Cancelled", value: orders.cancelled, href: "/admin/orders?status=cancelled" },
+        { label: "Cash not yet received", value: orders.pending_payments, href: "/admin/orders?payment=pending" },
+      ]
+    : [];
+
   const cards = [
     { label: "Total products", value: stats.total },
     { label: "Active", value: stats.active },
@@ -47,6 +71,25 @@ export default async function AdminDashboard() {
           </Link>
         </div>
 
+        <section className="admin-stack">
+          <h2>Orders</h2>
+          {ordersError ? (
+            <p className="admin-flash" data-tone="error">
+              Could not read orders. Run supabase/migrations/0006_orders.sql.
+            </p>
+          ) : (
+            <div className="admin-stats">
+              {orderCards.map((c) => (
+                <Link key={c.label} href={c.href} className="admin-stat">
+                  <b>{c.value}</b>
+                  <span className="admin-label">{c.label}</span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <h2>Catalogue</h2>
         <div className="admin-stats">
           {cards.map((c) => (
             <div key={c.label} className="admin-stat">

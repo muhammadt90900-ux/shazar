@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { saveVariants, type ActionState } from "@/lib/admin/actions";
 import { SubmitButton } from "./ui";
 import { Flash } from "./Flash";
@@ -15,6 +15,8 @@ interface Draft {
   color_ku: string;
   sku: string;
   stock: string;
+  /** stock as loaded, so saving does not overwrite sales made meanwhile */
+  stockWas: string;
 }
 
 const SIZES = ["", "XS", "S", "M", "L", "XL", "XXL", "OS"];
@@ -29,6 +31,7 @@ function toDraft(v: ProductVariantRow): Draft {
     color_ku: v.color_ku ?? "",
     sku: v.sku ?? "",
     stock: String(v.stock_quantity),
+    stockWas: String(v.stock_quantity),
   };
 }
 
@@ -47,6 +50,12 @@ export function VariantEditor({
   const [rows, setRows] = useState<Draft[]>(variants.map(toDraft));
   const [state, action] = useActionState<ActionState, FormData>(saveVariants, {});
 
+  // After a successful save the numbers on screen ARE the stored stock,
+  // so they become the new baseline for the next save.
+  useEffect(() => {
+    if (state.ok) setRows((r) => r.map((row) => ({ ...row, stockWas: row.stock })));
+  }, [state]);
+
   const update = (key: string, patch: Partial<Draft>) =>
     setRows((r) => r.map((row) => (row.key === key ? { ...row, ...patch } : row)));
 
@@ -61,6 +70,7 @@ export function VariantEditor({
         color_ku: "",
         sku: "",
         stock: "0",
+        stockWas: "",
       },
     ]);
 
@@ -98,6 +108,7 @@ export function VariantEditor({
                     <td>
                       {r.id && <input type="hidden" name="variant_id" value={r.id} />}
                       {!r.id && <input type="hidden" name="variant_id" value="" />}
+                      <input type="hidden" name="variant_stock_was" value={r.stockWas} />
                       <select
                         name="variant_size"
                         value={r.size}

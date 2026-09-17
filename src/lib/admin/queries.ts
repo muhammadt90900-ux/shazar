@@ -24,7 +24,9 @@ import type {
 export const LOW_STOCK_THRESHOLD = 5;
 
 export interface AdminProductRow extends ProductRow {
-  stock: number | null; // null = no variants, i.e. stock is not tracked
+  /** Sum of variant stock; for a product with no variants, its own
+   *  stock_quantity (0006). null only before 0006 has run. */
+  stock: number | null;
   variantCount: number;
   primaryImageUrl: string | null;
   collectionSlugs: string[];
@@ -52,7 +54,11 @@ function toAdminRow(row: ListRow): AdminProductRow {
   );
   return {
     ...row,
-    stock: variants.length ? variants.reduce((n, v) => n + v.stock_quantity, 0) : null,
+    stock: variants.length
+      ? variants.reduce((n, v) => n + v.stock_quantity, 0)
+      : typeof row.stock_quantity === "number"
+        ? row.stock_quantity
+        : null,
     variantCount: variants.length,
     primaryImageUrl: publicImageUrl(images[0]?.storage_path),
     collectionSlugs: (row.collection_products ?? [])

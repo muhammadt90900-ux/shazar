@@ -26,11 +26,11 @@ import type { ProductRow, ProductWithRelations, CollectionRow } from "@/types/da
  * always received. The database shape stops here.
  */
 
+// "*" rather than a column list for the product itself: stock_quantity
+// arrived in 0006, and naming it would turn "migration not run yet" into
+// "the whole shop silently falls back to the local catalogue".
 const SELECT_PRODUCT = `
-  id, slug, name_en, name_ku, description_en, description_ku,
-  origin_en, origin_ku, materials_en, materials_ku,
-  price_iqd, compare_at_price_iqd, sku, category, status,
-  featured, is_new, created_at, updated_at,
+  *,
   product_images ( id, product_id, storage_path, alt_en, alt_ku, sort_order, is_primary, created_at ),
   product_variants ( id, product_id, size, color, color_hex, color_ku, sku, stock_quantity, created_at, updated_at ),
   collection_products ( collection_id, collections ( slug ) )
@@ -114,6 +114,8 @@ function toProduct(row: ProductWithRelations): Product {
       color: v.color,
       stock: v.stock_quantity,
     })),
+    // only meaningful when there are no variants; 0 until 0006 has run
+    stock: row.stock_quantity ?? 0,
   };
 }
 

@@ -19,13 +19,14 @@ export function SubmitButton({
   variant?: "primary" | "default" | "danger" | "quiet";
 } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const { pending } = useFormStatus();
+  const { disabled, ...others } = rest;
   return (
     <button
       type="submit"
       className="admin-btn"
       data-variant={variant}
-      disabled={pending}
-      {...rest}
+      {...others}
+      disabled={pending || disabled}
     >
       {pending ? (pendingLabel ?? "Working…") : children}
     </button>

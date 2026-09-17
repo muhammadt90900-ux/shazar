@@ -29,6 +29,8 @@ export type ProductRow = {
   status: ProductStatus;
   featured: boolean;
   is_new: boolean;
+  /** Added in 0006. Counts ONLY for a product with no variant rows. */
+  stock_quantity: number;
   created_at: string;
   updated_at: string;
 };
@@ -85,6 +87,57 @@ export type ProfileRow = {
   updated_at: string;
 };
 
+// ---- phase 4: orders (0006_orders.sql) -----------------------------
+
+export type OrderStatus =
+  | "pending"
+  | "confirmed"
+  | "processing"
+  | "shipped"
+  | "delivered"
+  | "cancelled";
+export type PaymentStatus = "pending" | "paid" | "failed";
+export type PaymentMethod = "cash_on_delivery";
+
+/** The columns an admin may read. The checkout secrets (idempotency key,
+ *  access salt, token hash) are withheld at column level and are
+ *  deliberately absent from this type. */
+export type OrderRow = {
+  id: string;
+  order_number: string;
+  status: OrderStatus;
+  payment_method: PaymentMethod;
+  payment_status: PaymentStatus;
+  customer_name: string;
+  customer_phone: string;
+  customer_city: string;
+  customer_address: string;
+  customer_notes: string | null;
+  subtotal_iqd: number;
+  shipping_iqd: number;
+  total_iqd: number;
+  stock_restored_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type VariantSnapshot = { size: string | null; color: string | null; color_ku: string | null };
+
+export type OrderItemRow = {
+  id: string;
+  order_id: string;
+  product_id: string | null;
+  variant_id: string | null;
+  product_name_snapshot: string;
+  sku_snapshot: string | null;
+  variant_snapshot: VariantSnapshot | null;
+  unit_price_iqd: number;
+  quantity: number;
+  line_total_iqd: number;
+  image_path_snapshot: string | null;
+  created_at: string;
+};
+
 /** A product joined with everything a page needs, in one round trip. */
 export type ProductWithRelations = ProductRow & {
   product_images: ProductImageRow[];
@@ -131,6 +184,19 @@ export interface Database {
         Update: Partial<ProfileRow>;
         Relationships: [];
       };
+      /** Read-only for admins; written only by the 0006 functions. */
+      orders: {
+        Row: OrderRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      order_items: {
+        Row: OrderItemRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -139,6 +205,34 @@ export interface Database {
       set_primary_product_image: {
         Args: { p_product_id: string; p_image_id: string };
         Returns: undefined;
+      };
+      /** 0006 — the only way an order is created. */
+      place_order: {
+        Args: {
+          p_idempotency_key: string;
+          p_customer_name: string;
+          p_customer_phone: string;
+          p_customer_city: string;
+          p_customer_address: string;
+          p_customer_notes: string | null;
+          p_items: { product_id: string; variant_id: string | null; quantity: number }[];
+          p_expected_total: number | null;
+        };
+        Returns: unknown;
+      };
+      /** 0006 — one order, to whoever holds its access token. */
+      get_order_for_access: {
+        Args: { p_order_number: string; p_access_token: string };
+        Returns: unknown;
+      };
+      /** 0006 — admin status / payment changes, stock returned once. */
+      admin_update_order: {
+        Args: { p_order_id: string; p_status: string; p_payment_status: string };
+        Returns: unknown;
+      };
+      admin_order_counts: {
+        Args: Record<string, never>;
+        Returns: unknown;
       };
     };
     Enums: { product_status: ProductStatus; collection_status: CollectionStatus };

@@ -231,6 +231,9 @@ export async function saveVariants(
   }
 
   for (const v of values) {
+    // Stock is only written when the admin changed it. Orders take stock
+    // while this form sits open; resaving the number it was loaded with
+    // would quietly put sold pieces back on the shelf.
     const row = {
       product_id: productId,
       size: v.size,
@@ -238,7 +241,7 @@ export async function saveVariants(
       color_hex: v.color_hex,
       color_ku: v.color_ku,
       sku: v.sku,
-      stock_quantity: v.stock_quantity,
+      ...(v.stock_changed ? { stock_quantity: v.stock_quantity } : {}),
     };
     const { error } = v.id
       ? await supabase.from("product_variants").update(row).eq("id", v.id)

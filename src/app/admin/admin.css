@@ -208,3 +208,19 @@
 .admin-skeleton { background: linear-gradient(90deg, #1b1d18, #23261f, #1b1d18); background-size: 200% 100%; animation: admin-shimmer 1.2s linear infinite; height: 14px; }
 @keyframes admin-shimmer { to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .admin-skeleton { animation: none; } }
+
+/* ---- phase 4: orders ---------------------------------------------- */
+.admin-pill[data-tone="pending"] { color: var(--a-text); }
+.admin-pill[data-tone="confirmed"],
+.admin-pill[data-tone="processing"] { border-color: #8a8264; color: #cfc39a; }
+.admin-pill[data-tone="shipped"] { border-color: #6f8497; color: #a9bccd; }
+.admin-pill[data-tone="delivered"],
+.admin-pill[data-tone="paid"] { border-color: var(--a-green); color: #9db58f; }
+.admin-pill[data-tone="cancelled"] { color: var(--a-dim); opacity: 0.6; text-decoration: line-through; }
+.admin-pill[data-tone="unpaid"] { border-color: var(--a-danger); color: #d99a90; }
+
+.admin-dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; font-size: 13px; margin: 0; }
+.admin-dl dt { color: var(--a-dim); }
+.admin-dl dd { margin: 0; overflow-wrap: anywhere; }
+.admin-totals { max-width: 320px; margin-inline-start: auto; font-size: 14px; }
+.admin-totals dd { text-align: end; }
