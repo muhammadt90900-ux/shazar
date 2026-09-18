@@ -224,3 +224,10 @@
 .admin-dl dd { margin: 0; overflow-wrap: anywhere; }
 .admin-totals { max-width: 320px; margin-inline-start: auto; font-size: 14px; }
 .admin-totals dd { text-align: end; }
+
+/* ---- phase 5: notifications ---------------------------------------- */
+.admin-pill[data-tone="n-sent"] { border-color: var(--a-green); color: #9db58f; }
+.admin-pill[data-tone="n-failed"] { border-color: var(--a-danger); color: #d99a90; }
+.admin-pill[data-tone="n-skipped"],
+.admin-pill[data-tone="n-pending"],
+.admin-pill[data-tone="n-none"] { color: var(--a-dim); }

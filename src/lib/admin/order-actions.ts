@@ -1,6 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { notifyOrderEvent, summaryFromAdmin } from "@/lib/notifications/dispatch";
+import type { OrderEvent } from "@/lib/notifications/types";
 import { requireAdmin } from "@/lib/auth/admin";
 import { getSupabaseSessionClient } from "@/lib/supabase/ssr";
 import type { ActionState } from "./actions";
@@ -52,6 +55,21 @@ export async function updateOrder(_prev: ActionState, form: FormData): Promise<A
   const result = data as { ok: boolean; code?: string; stock_restored?: boolean };
   if (!result?.ok) {
     return { message: MESSAGES[result?.code ?? ""] ?? "Could not update the order." };
+  }
+
+  // Status-change notifications go through the same claim/log/dedupe
+  // path as new orders. Which events actually send is ENABLED_EVENTS —
+  // in phase 5 that is order_created only, so this returns at once.
+  const previous = String(form.get("previous_status") ?? "");
+  if (previous !== status && status !== "pending") {
+    const event = `order_${status}` as OrderEvent;
+    const { data: row } = await supabase.from("orders").select("order_number").eq("id", id).maybeSingle();
+    if (row) {
+      after(() =>
+        notifyOrderEvent(event, row.order_number, { kind: "admin", client: supabase },
+          summaryFromAdmin(supabase, row.order_number)),
+      );
+    }
   }
 
   revalidatePath(`/admin/orders/${id}`);

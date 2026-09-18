@@ -9,7 +9,6 @@ import { Price } from "@/components/ui/Price";
 import { productFrame } from "@/data/images";
 import { useCart } from "@/context/cart-context";
 import { placeOrder, quoteCart } from "@/lib/checkout/actions";
-import { CITIES, OTHER_CITY } from "@/lib/checkout/cities";
 import { copy, type Bi } from "@/lib/checkout/copy";
 import { LIMITS } from "@/lib/checkout/limits";
 import {
@@ -59,7 +58,7 @@ function attemptKey(signature: string): string {
   }
 }
 
-const EMPTY: CustomerInput = { name: "", phone: "", city: "", cityOther: "", address: "", notes: "" };
+const EMPTY: CustomerInput = { name: "", phone: "", city: "", address: "", notes: "" };
 const FIELD_ORDER: CustomerField[] = ["name", "phone", "city", "address", "notes"];
 
 function Bilingual({ text, className = "" }: { text: Bi; className?: string }) {
@@ -101,6 +100,9 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
+  const cityRef = useRef(form.city);
+  cityRef.current = form.city;
+
   const refreshQuote = useCallback(async () => {
     if (!configured || itemsRef.current.length === 0) {
       setQuote(null);
@@ -108,7 +110,9 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
     }
     setQuoting(true);
     try {
-      const result = await quoteCart(itemsRef.current);
+      // prices, stock, the city list and the shipping for the chosen city
+      // all come back together, from the database
+      const result = await quoteCart(itemsRef.current, cityRef.current);
       if (!result.ok) {
         setQuote(null);
         setBanner(
@@ -131,12 +135,12 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
     }
   }, [configured, applyQuote]);
 
-  // Re-quote whenever the bag itself changes (debounced for +/- taps).
+  // Re-quote whenever the bag or the city changes (debounced for +/- taps).
   useEffect(() => {
     if (!ready || placed.current) return;
     const t = setTimeout(() => void refreshQuote(), 250);
     return () => clearTimeout(t);
-  }, [ready, signature, refreshQuote]);
+  }, [ready, signature, form.city, refreshQuote]);
 
   const quoted = useMemo(() => new Map((quote?.lines ?? []).map((q) => [q.lineId, q])), [quote]);
   // A quote is current only if it covers exactly the lines in the bag.
@@ -182,6 +186,11 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
         setBanner(copy.orderError.cart_problems);
         return;
       }
+      if (!fresh.city) {
+        setErrors((e) => ({ ...e, city: "city_required" }));
+        setBanner(copy.orderError.invalid_city);
+        return;
+      }
 
       const result = await placeOrder({
         idempotencyKey: attemptKey(signature),
@@ -201,7 +210,9 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
       }
 
       if (result.fieldErrors) setErrors(result.fieldErrors);
-      if (result.code === "price_changed" || result.code === "cart_problems") await refreshQuote();
+      if (result.code === "price_changed" || result.code === "cart_problems" || result.code === "invalid_city") {
+        await refreshQuote();
+      }
       setBanner(copy.orderError[result.code]);
     } catch {
       // The request may or may not have reached the database. The bag and
@@ -247,9 +258,12 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
   }
 
   const shownSubtotal = quoteCurrent ? quote!.subtotal : lines.reduce((n, l) => n + l.price * l.quantity, 0);
-  const shownShipping = quoteCurrent ? quote!.shipping : 0;
-  const shownTotal = shownSubtotal + shownShipping;
-  const canPlace = quoteCurrent && problems.length === 0 && !quoting;
+  // null = no valid city yet, so no shipping figure is invented
+  const shownShipping = quoteCurrent ? quote!.shipping : null;
+  const shownTotal = shownSubtotal + (shownShipping ?? 0);
+  const cities = quote?.cities ?? [];
+  const cityGone = Boolean(form.city) && quoteCurrent && !quote!.city;
+  const canPlace = quoteCurrent && problems.length === 0 && !quoting && Boolean(quote!.city);
 
   const err = (f: CustomerField) => (errors[f] ? copy.fieldError[errors[f]!] : undefined);
 
@@ -338,8 +352,18 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
               </dd>
             </div>
             <div className="flex justify-between gap-4">
-              <dt className="text-ash">{copy.checkout.shipping.en}</dt>
-              <dd>{shownShipping === 0 ? copy.checkout.shippingFree.en : <Price value={shownShipping} />}</dd>
+              <dt className="text-ash">
+                {quote?.city ? copy.checkout.shippingTo(quote.city).en : copy.checkout.shipping.en}
+              </dt>
+              <dd className={shownShipping === null ? "text-ash" : ""}>
+                {shownShipping === null ? (
+                  copy.checkout.shippingChoose.en
+                ) : shownShipping === 0 ? (
+                  copy.checkout.shippingFree.en
+                ) : (
+                  <Price value={shownShipping} />
+                )}
+              </dd>
             </div>
             <div className="flex items-baseline justify-between gap-4 border-t border-[var(--rule)] pt-4">
               <dt className="flex items-baseline gap-3">
@@ -401,39 +425,31 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
             />
           </Field>
 
-          <Field id="co-city" label={copy.checkout.city} error={err("city")}>
+          <Field
+            id="co-city"
+            label={copy.checkout.city}
+            hint={copy.checkout.cityHint}
+            error={err("city") ?? (cityGone ? copy.orderError.invalid_city : undefined)}
+          >
             <select
               id="co-city"
               value={form.city}
               onChange={(e) => update("city", e.target.value)}
-              aria-invalid={Boolean(errors.city)}
-              aria-describedby={errors.city ? "co-city-error" : undefined}
-              className={`${inputClass} appearance-none bg-char`}
+              disabled={cities.length === 0}
+              aria-invalid={Boolean(errors.city) || cityGone}
+              aria-describedby={errors.city ? "co-city-error" : "co-city-hint"}
+              className={`${inputClass} appearance-none bg-char disabled:opacity-50`}
             >
-              <option value="">{copy.checkout.cityChoose.en}</option>
-              {CITIES.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.value} — {c.ku}
+              <option value="">{cities.length ? copy.checkout.cityChoose.en : copy.checkout.checking.en}</option>
+              {cities.map((c) => (
+                <option key={c.city} value={c.city}>
+                  {c.city}
+                  {c.cityKu ? ` — ${c.cityKu}` : ""} · {c.price === 0 ? copy.checkout.shippingFree.en : `${c.price.toLocaleString("en-US")} IQD`}
                 </option>
               ))}
-              <option value={OTHER_CITY}>
-                {copy.checkout.cityOther.en} — {copy.checkout.cityOther.ku}
-              </option>
+              {/* a city that was chosen and has since been switched off */}
+              {cityGone && <option value={form.city}>{form.city}</option>}
             </select>
-            {form.city === OTHER_CITY && (
-              <input
-                id="co-city-other"
-                type="text"
-                autoComplete="address-level2"
-                maxLength={LIMITS.cityMax}
-                placeholder={copy.checkout.cityOtherLabel.en}
-                aria-label={copy.checkout.cityOtherLabel.en}
-                value={form.cityOther}
-                onChange={(e) => update("cityOther", e.target.value)}
-                aria-invalid={Boolean(errors.city)}
-                className={`${inputClass} mt-3`}
-              />
-            )}
           </Field>
 
           <Field id="co-address" label={copy.checkout.address} hint={copy.checkout.addressHint} error={err("address")}>

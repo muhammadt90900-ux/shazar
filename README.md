@@ -39,7 +39,7 @@ phase, and it must never carry a `NEXT_PUBLIC_` prefix.
 
 ## 3. Run the migrations
 
-Six files in `supabase/migrations/`, in order:
+Seven files in `supabase/migrations/`, in order:
 
     0001_initial_schema.sql    tables, indexes, triggers, is_admin()
     0002_rls_policies.sql      row level security
@@ -47,9 +47,12 @@ Six files in `supabase/migrations/`, in order:
     0004_seed_catalogue.sql    the twelve pieces the site already had
     0005_admin_support.sql     admin indexes, primary-image switch
     0006_orders.sql            orders, order items, checkout functions
+    0007_operations.sql        shipping rates, tracking, rate limits,
+                               notification settings and log
 
-**Upgrading an existing project:** run `0006_orders.sql` once in the SQL
-Editor *before* deploying the phase 4 code — the admin product form and
+**Upgrading an existing project:** run any migration you have not run
+yet, in order, in the SQL Editor *before* deploying the code that needs
+it — the admin product form and
 checkout both read columns it adds.
 
 **Easiest way** — Supabase dashboard → **SQL Editor** → paste each file
@@ -61,7 +64,7 @@ in order → Run.
     supabase link --project-ref <your-ref>
     supabase db push
 
-All six are idempotent: running them twice changes nothing.
+All seven are idempotent: running them twice changes nothing.
 
 ## 4. Seed data
 
@@ -124,22 +127,17 @@ is no floating point near a price anywhere in this project.
 
 A product is invisible to the public until `status = 'active'`.
 
-## 7. Admin access
-
-There is no admin UI yet. The database is ready for one:
-
-- `profiles.role` is `customer` or `admin`.
-- `public.is_admin()` reads that table; every write policy calls it.
-- New sign-ups always get `customer`. Nothing the browser can edit —
-  JWT metadata, localStorage, a React boolean — has any bearing on it.
-
-To make yourself an admin, in the SQL editor:
-
-    update profiles set role = 'admin' where id = '<your auth user id>';
-
----
-
 ## 7. The admin dashboard
+
+    /admin                    dashboard — order counts, low stock
+    /admin/products           list, search, filter, sort
+    /admin/collections
+    /admin/orders             orders, filters, order detail
+    /admin/shipping           per-city shipping prices
+    /admin/settings           /admin/settings/notifications
+
+Roles are granted in SQL, not from this screen — see "Creating the first
+admin" below.
 
     /admin            dashboard — real counts, low stock
     /admin/products   list, search, filter, sort
@@ -337,12 +335,113 @@ publishable key. **There is still no service-role key anywhere in the
 project** — the checkout functions run inside the database with exactly
 the rights they need.
 
+## 9. Shipping, tracking and notifications (phase 5)
+
+### Shipping prices
+
+`shipping_rates` holds one row per city: name, Kurdish name, price in
+whole dinar, active flag, sort order. Edit them at **/admin/shipping**.
+The prices the migration seeds are placeholders — set your real ones
+before you take orders.
+
+Checkout offers active cities only, and the price shown next to each. A
+city that is switched off disappears from checkout immediately; an
+unknown or inactive city is refused by the database when the order is
+placed, so a stale page cannot order to it.
+
+The browser never sends a shipping price. `place_order` reads the rate
+itself, adds it to the subtotal, and copies the figure onto the order as
+`shipping_iqd`, next to the city. Changing a price later never changes
+an order that already exists; new orders use the new price.
+
+Deleting a city is refused while it still has orders that are not
+delivered or cancelled — deactivate it instead. Deleting one never
+alters past orders, which carry their own city and price.
+
+### Track order
+
+**/track-order** asks for the order number and the phone number the
+order was placed with. Both must match. The lookup is
+`public.track_order` (SECURITY DEFINER): it normalises the phone the
+same way checkout does, returns only safe fields — status, payment
+status, dates, city, masked phone, items, totals — and never the
+address, the full phone, any id or any secret column.
+
+Against guessing, the same answer ("we couldn't find an order") is given
+for a wrong phone, an unknown number and a locked number; after five
+failures against one order number, that number answers the same way to
+everyone for fifteen minutes, correct phone or not.
+
+The customer's confirmation page links to it, and so does the footer.
+Neither puts the order number or the phone in a URL.
+
+### Rate limiting
+
+Two layers, neither of them in the browser:
+
+- **per IP**, in `hit_rate_limit`: 10 checkout attempts and 20 tracking
+  attempts per 10 minutes. The IP is never stored — it is hashed with
+  `RATE_LIMIT_SECRET` first. Set that variable in production. If the
+  limiter itself is unreachable the request is allowed: an outage must
+  not stop the shop selling.
+- **per phone**, inside `place_order`: 5 orders an hour and 15 a day.
+  Checked after the idempotency replay, so retrying an order that
+  already went through is never refused.
+
+A refused customer sees "Too many order attempts. Please wait a few
+minutes and try again," and their bag is untouched.
+
+### Order notifications
+
+When an order is created, the shop is notified. The send happens
+**after** the order is committed and after the response is sent
+(`after()` from `next/server`), so a provider that is slow, broken or
+not configured can neither delay the customer nor roll anything back.
+
+Each (order, provider, event) may be sent once: `claim_notification`
+inserts the log row, and a second attempt gets "duplicate". Every
+outcome — `sent`, `failed`, `skipped` — is in `notification_logs`,
+visible on the order page and at **/admin/settings/notifications**,
+where a failed one can be retried.
+
+**Telegram.** Create a bot with @BotFather, set `TELEGRAM_BOT_TOKEN`.
+Send the bot a message, then read your chat id from
+`https://api.telegram.org/bot<TOKEN>/getUpdates` and set
+`TELEGRAM_CHAT_ID`. Use the test button on the notifications page.
+
+**WhatsApp (Cloud API).** Set `WHATSAPP_ACCESS_TOKEN`,
+`WHATSAPP_PHONE_NUMBER_ID` and `WHATSAPP_ADMIN_NUMBER`. Meta only
+delivers a free-form text message within 24 hours of the admin number
+writing to the business number; for reliable delivery approve a template
+and set `WHATSAPP_TEMPLATE_NAME` (body parameters: {{1}} order number,
+{{2}} total, {{3}} city).
+
+Tokens live in server environment variables only. Nothing about them is
+sent to the browser — the admin page shows only whether a provider is
+configured and a masked destination. Switching a provider off is a
+database setting; its orders are then logged as `skipped`.
+
+The message carries the order number, customer name, **masked** phone,
+city, items, totals and status. Never the address, an id or a token.
+
+Events are wired for confirmed / processing / shipped / delivered /
+cancelled as well, but only `order_created` sends. Switch one on by
+adding it to `ENABLED_EVENTS` in `src/lib/notifications/types.ts`.
+
+### Environment variables
+
+Nothing new is required. Everything in this section is optional:
+`TELEGRAM_*`, `WHATSAPP_*`, `RATE_LIMIT_SECRET`. See `.env.example`.
+There is still no service-role key anywhere in the project.
+
 ## Project layout
 
     src/app/                routes
     src/components/         UI, unchanged by the database work
     src/lib/data/catalog.ts the one data-access boundary
     src/lib/checkout/       cart limits, validation, copy, server actions
+    src/lib/notifications/  providers, message format, dispatch
+    src/lib/rate-limit.ts   per-IP limiting
     src/lib/admin/          admin queries, validation and actions
     src/lib/supabase/       env gate, server client, storage URLs
     src/types/database.ts   row shapes
@@ -353,7 +452,7 @@ the rights they need.
 
 ## Not built yet
 
-Online payment (ZainCash, FastPay), shipping prices, customer accounts
-and order history, email/SMS notifications, coupons. Checkout needs
-Supabase: with the local catalogue only, `/checkout` says ordering is
-unavailable rather than pretending.
+Online payment (ZainCash, FastPay), customer accounts and order history,
+coupons, reviews, shipping-company integration. Checkout and tracking
+need Supabase: with the local catalogue only, `/checkout` says ordering
+is unavailable rather than pretending.

@@ -47,6 +47,7 @@ export function OrderStatusForm({
       }}
     >
       <input type="hidden" name="id" value={id} />
+      <input type="hidden" name="previous_status" value={status} />
       <h2>Update</h2>
       <Flash state={state} />
 

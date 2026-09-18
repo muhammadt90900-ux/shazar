@@ -6,6 +6,7 @@ import { StatusPill } from "@/components/admin/Flash";
 import { OrderStatusForm } from "@/components/admin/OrderStatusForm";
 import { formatIraqPhone, getOrder, type AdminOrderDetail } from "@/lib/admin/orders";
 import { formatPrice } from "@/lib/format";
+import { NotificationLogTable } from "@/components/admin/NotificationLogTable";
 
 export const metadata = { title: "Order" };
 
@@ -40,7 +41,7 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
   }
   if (!detail) notFound();
 
-  const { order: o, items } = detail;
+  const { order: o, items, notifications } = detail;
 
   return (
     <div className="admin-shell">
@@ -161,7 +162,7 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
           <dl className="admin-dl admin-totals">
             <dt>Subtotal</dt>
             <dd className="num">{formatPrice(o.subtotal_iqd)}</dd>
-            <dt>Shipping</dt>
+            <dt>Shipping to {o.customer_city}</dt>
             <dd className="num">{formatPrice(o.shipping_iqd)}</dd>
             <dt>
               <b>Total</b>
@@ -171,8 +172,14 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
             </dd>
           </dl>
           <p className="admin-label">
-            Prices are what the customer was charged when the order was placed, not today&apos;s prices.
+            Prices and shipping are what the customer was charged when the order was placed, not
+            today&apos;s rates.
           </p>
+        </section>
+
+        <section className="admin-stack">
+          <h2>Notifications</h2>
+          <NotificationLogTable logs={notifications} />
         </section>
       </main>
     </div>

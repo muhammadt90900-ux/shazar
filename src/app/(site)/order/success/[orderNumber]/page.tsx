@@ -96,6 +96,10 @@ export default async function OrderSuccessPage({
             <Button href="/shop" variant="solid" ku={copy.success.continue.ku}>
               {copy.success.continue.en}
             </Button>
+            {/* no phone or number in the URL — the customer types both */}
+            <Button href="/track-order" ku={copy.success.track.ku}>
+              {copy.success.track.en}
+            </Button>
           </div>
         </section>
 

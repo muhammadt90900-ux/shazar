@@ -1,10 +1,14 @@
 "use server";
 
 import { cookies } from "next/headers";
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { publicImageUrl } from "@/lib/supabase/storage";
-import { LIMITS, SHIPPING_IQD, UUID_RE } from "./limits";
+import { LIMITS, ORDER_NUMBER_RE, RATE_LIMITS, UUID_RE } from "./limits";
+import { allowRequest } from "@/lib/rate-limit";
+import { notifyOrderEvent, summaryFromAccess } from "@/lib/notifications/dispatch";
+import { normalizeIraqPhone } from "./phone";
 import { validateCustomer } from "./validation";
 import { orderCookieName, ORDER_COOKIE_MAX_AGE } from "./cookie";
 import type {
@@ -15,6 +19,8 @@ import type {
   PlaceOrderResult,
   QuoteResult,
   QuotedLine,
+  ShippingCity,
+  TrackResult,
 } from "./types";
 
 /**
@@ -69,12 +75,31 @@ type ProductForQuote = {
  * Current price and stock for every line in the bag. For display only —
  * the order itself re-reads all of it under a lock.
  */
-export async function quoteCart(rawItems: unknown): Promise<QuoteResult> {
+export async function quoteCart(rawItems: unknown, rawCity?: unknown): Promise<QuoteResult> {
   const supabase = getSupabaseServerClient();
   if (!supabase) return { ok: false, code: "not_configured" };
 
   const items = readItems(rawItems);
   if (!items) return { ok: false, code: "invalid_request" };
+
+  // Active shipping destinations — RLS returns active rows only.
+  const { data: rateRows, error: ratesError } = await supabase
+    .from("shipping_rates")
+    .select("city, city_ku, price_iqd")
+    .eq("active", true)
+    .order("sort_order", { ascending: true })
+    .order("city", { ascending: true });
+  if (ratesError) {
+    console.error("[checkout] shipping rates failed", ratesError.code ?? "unknown");
+    return { ok: false, code: "server_error" };
+  }
+  const cities: ShippingCity[] = (rateRows ?? []).map((r) => ({
+    city: r.city,
+    cityKu: r.city_ku,
+    price: r.price_iqd,
+  }));
+  const wantedCity = typeof rawCity === "string" ? rawCity.trim().toLowerCase() : "";
+  const selected = wantedCity ? (cities.find((c) => c.city.toLowerCase() === wantedCity) ?? null) : null;
 
   const ids = [...new Set(items.map((i) => i.productId).filter((id) => UUID_RE.test(id)))];
 
@@ -160,7 +185,17 @@ export async function quoteCart(rawItems: unknown): Promise<QuoteResult> {
     return { ...known, sku, status: "ok", available, lineTotal };
   });
 
-  return { ok: true, lines, subtotal, shipping: SHIPPING_IQD, total: subtotal + SHIPPING_IQD, allOk };
+  const shipping = selected ? selected.price : null;
+  return {
+    ok: true,
+    lines,
+    subtotal,
+    cities,
+    city: selected?.city ?? null,
+    shipping,
+    total: subtotal + (shipping ?? 0),
+    allOk,
+  };
 }
 
 type RpcResult =
@@ -168,6 +203,8 @@ type RpcResult =
   | { ok: false; code: string };
 
 const KNOWN_FAILURES: OrderFailureCode[] = [
+  "invalid_city",
+  "rate_limited",
   "invalid_request",
   "invalid_customer",
   "empty_cart",
@@ -184,6 +221,11 @@ export async function placeOrder(raw: PlaceOrderInput): Promise<PlaceOrderResult
 
   const key = typeof raw.idempotencyKey === "string" ? raw.idempotencyKey : "";
   if (!UUID_RE.test(key)) return { ok: false, code: "invalid_request" };
+
+  // Per-IP attempt limit, before any real work. Generous: see RATE_LIMITS.
+  if (!(await allowRequest("checkout", RATE_LIMITS.checkout.limit, RATE_LIMITS.checkout.windowSeconds))) {
+    return { ok: false, code: "rate_limited" };
+  }
 
   const items = readItems(raw.items);
   if (!items) {
@@ -226,6 +268,7 @@ export async function placeOrder(raw: PlaceOrderInput): Promise<PlaceOrderResult
     const code = KNOWN_FAILURES.includes(result.code as OrderFailureCode)
       ? (result.code as OrderFailureCode)
       : "server_error";
+    if (code === "invalid_city") return { ok: false, code, fieldErrors: { city: "city_required" } };
     return { ok: false, code };
   }
 
@@ -244,5 +287,92 @@ export async function placeOrder(raw: PlaceOrderInput): Promise<PlaceOrderResult
   // Stock moved: product pages are regenerated on their next visit.
   if (!result.replayed) revalidatePath("/product/[slug]", "page");
 
+  // Tell the shop. Runs after the response is sent: the customer never
+  // waits for Telegram, and nothing a provider does can touch the order.
+  // A replay claims the same notification and is refused as a duplicate.
+  const { order_number, access_token } = result;
+  after(() =>
+    notifyOrderEvent("order_created", order_number, { kind: "token", accessToken: access_token },
+      summaryFromAccess(order_number, access_token, value.phone)),
+  );
+
   return { ok: true, orderNumber: result.order_number };
+}
+
+type TrackRow = {
+  ok: boolean;
+  order_number: string;
+  status: string;
+  payment_status: string;
+  payment_method: string;
+  created_at: string;
+  updated_at: string;
+  city: string;
+  phone_masked: string;
+  subtotal_iqd: number;
+  shipping_iqd: number;
+  total_iqd: number;
+  items: {
+    name: string;
+    variant: { size: string | null; color: string | null } | null;
+    quantity: number;
+    unit_price: number;
+    line_total: number;
+  }[];
+};
+
+/**
+ * /track-order. Order number AND phone, both required. Limited per IP
+ * here, and per order number inside public.track_order, which also
+ * answers "not found" identically for a wrong phone, an unknown number
+ * and a locked number — so the response never confirms an order exists.
+ */
+export async function trackOrder(rawNumber: unknown, rawPhone: unknown): Promise<TrackResult> {
+  const supabase = getSupabaseServerClient();
+  if (!supabase) return { ok: false, code: "not_configured" };
+
+  const orderNumber = typeof rawNumber === "string" ? rawNumber.trim().toUpperCase() : "";
+  const phone = normalizeIraqPhone(typeof rawPhone === "string" ? rawPhone : "");
+  if (!ORDER_NUMBER_RE.test(orderNumber) || !phone) return { ok: false, code: "invalid_input" };
+
+  if (!(await allowRequest("track", RATE_LIMITS.track.limit, RATE_LIMITS.track.windowSeconds))) {
+    return { ok: false, code: "rate_limited" };
+  }
+
+  const { data, error } = await supabase.rpc("track_order", {
+    p_order_number: orderNumber,
+    p_phone: phone,
+  });
+  if (error || !data) {
+    console.error("[track] lookup failed", error?.code ?? "no data");
+    return { ok: false, code: "server_error" };
+  }
+
+  const o = data as TrackRow;
+  if (!o.ok) return { ok: false, code: "not_found" };
+
+  return {
+    ok: true,
+    order: {
+      orderNumber: o.order_number,
+      status: o.status,
+      paymentStatus: o.payment_status,
+      paymentMethod: o.payment_method,
+      createdAt: o.created_at,
+      updatedAt: o.updated_at,
+      city: o.city,
+      phoneMasked: o.phone_masked,
+      subtotal: o.subtotal_iqd,
+      shipping: o.shipping_iqd,
+      total: o.total_iqd,
+      items: (o.items ?? []).map((i) => ({
+        name: i.name,
+        size: i.variant?.size ?? null,
+        color: i.variant?.color ?? null,
+        quantity: i.quantity,
+        unitPrice: i.unit_price,
+        lineTotal: i.line_total,
+      })),
+    },
+  };
 }

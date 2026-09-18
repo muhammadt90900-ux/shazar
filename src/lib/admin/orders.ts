@@ -3,6 +3,8 @@ import "server-only";
 import { getSupabaseSessionClient } from "@/lib/supabase/ssr";
 import { publicImageUrl } from "@/lib/supabase/storage";
 import type {
+  NotificationLogRow,
+  NotificationStatus,
   OrderItemRow,
   OrderRow,
   OrderStatus,
@@ -41,7 +43,23 @@ export interface OrderFilters {
   city?: string;
   from?: string;
   to?: string;
+  /** sent | failed | skipped — the new-order notification's outcome */
+  notify?: string;
   page?: string;
+}
+
+export type OrderListRow = OrderRow & {
+  notification_logs: Pick<NotificationLogRow, "provider" | "status" | "event_type">[];
+};
+
+/** One word for the list: the best outcome across providers. */
+export function notificationSummary(logs: OrderListRow["notification_logs"]): string {
+  const created = logs.filter((l) => l.event_type === "order_created");
+  if (!created.length) return "none";
+  if (created.some((l) => l.status === "sent")) return "sent";
+  if (created.some((l) => l.status === "failed")) return "failed";
+  if (created.some((l) => l.status === "pending")) return "pending";
+  return "skipped";
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -61,7 +79,7 @@ function baghdadDayStart(date: string): string {
 }
 
 export async function listOrders(f: OrderFilters): Promise<{
-  rows: OrderRow[];
+  rows: OrderListRow[];
   count: number;
   page: number;
   pages: number;
@@ -72,14 +90,20 @@ export async function listOrders(f: OrderFilters): Promise<{
   const page = Math.max(1, Math.min(10_000, Number.parseInt(f.page ?? "1", 10) || 1));
   const from = (page - 1) * ORDERS_PAGE_SIZE;
 
+  const notify = ["sent", "failed", "skipped"].includes(f.notify ?? "") ? f.notify! : null;
+
   let query = supabase
     .from("orders")
-    .select(ORDER_COLUMNS, { count: "exact" })
+    .select(`${ORDER_COLUMNS}, notification_logs${notify ? "!inner" : ""} ( provider, status, event_type )`, {
+      count: "exact",
+    })
     .order("created_at", { ascending: false })
     .range(from, from + ORDERS_PAGE_SIZE - 1);
 
   if (f.status && (ORDER_STATUSES as string[]).includes(f.status)) query = query.eq("status", f.status as OrderStatus);
   if (f.payment && ["pending", "paid", "failed"].includes(f.payment)) query = query.eq("payment_status", f.payment as PaymentStatus);
+
+  if (notify) query = query.eq("notification_logs.status", notify as NotificationStatus);
 
   const city = safeTerm(f.city ?? "");
   if (city) query = query.ilike("customer_city", `%${city}%`);
@@ -106,7 +130,7 @@ export async function listOrders(f: OrderFilters): Promise<{
 
   const total = count ?? 0;
   return {
-    rows: (data ?? []) as unknown as OrderRow[],
+    rows: (data ?? []) as unknown as OrderListRow[],
     count: total,
     page,
     pages: Math.max(1, Math.ceil(total / ORDERS_PAGE_SIZE)),
@@ -116,6 +140,7 @@ export async function listOrders(f: OrderFilters): Promise<{
 export interface AdminOrderDetail {
   order: OrderRow;
   items: (OrderItemRow & { imageUrl: string | null })[];
+  notifications: NotificationLogRow[];
 }
 
 export async function getOrder(id: string): Promise<AdminOrderDetail | null> {
@@ -123,9 +148,11 @@ export async function getOrder(id: string): Promise<AdminOrderDetail | null> {
   const supabase = await getSupabaseSessionClient();
   if (!supabase) return null;
 
-  const [{ data: order, error }, { data: items, error: itemsError }] = await Promise.all([
+  const [{ data: order, error }, { data: items, error: itemsError }, { data: notifications }] = await Promise.all([
     supabase.from("orders").select(ORDER_COLUMNS).eq("id", id).maybeSingle(),
     supabase.from("order_items").select("*").eq("order_id", id).order("created_at", { ascending: true }),
+    // absent before 0007 has run; the page simply shows none
+    supabase.from("notification_logs").select("*").eq("order_id", id).order("created_at", { ascending: true }),
   ]);
 
   if (error) throw error;
@@ -138,6 +165,7 @@ export async function getOrder(id: string): Promise<AdminOrderDetail | null> {
       ...i,
       imageUrl: publicImageUrl(i.image_path_snapshot),
     })),
+    notifications: (notifications ?? []) as NotificationLogRow[],
   };
 }
 

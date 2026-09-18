@@ -23,8 +23,27 @@ export interface QuotedLine {
   sku: string | null;
 }
 
+export interface ShippingCity {
+  city: string;
+  cityKu: string;
+  price: number;
+}
+
 export type QuoteResult =
-  | { ok: true; lines: QuotedLine[]; subtotal: number; shipping: number; total: number; allOk: boolean }
+  | {
+      ok: true;
+      lines: QuotedLine[];
+      subtotal: number;
+      /** active shipping destinations, read from the database on every quote */
+      cities: ShippingCity[];
+      /** the selected city as the rate table spells it, or null */
+      city: string | null;
+      /** null until a valid city is chosen */
+      shipping: number | null;
+      total: number;
+      /** every line is purchasable (the city is checked separately) */
+      allOk: boolean;
+    }
   | { ok: false; code: "not_configured" | "server_error" | "invalid_request" };
 
 export interface PlaceOrderInput {
@@ -33,7 +52,6 @@ export interface PlaceOrderInput {
     name: string;
     phone: string;
     city: string;
-    cityOther: string;
     address: string;
     notes: string;
   };
@@ -50,6 +68,8 @@ export type OrderFailureCode =
   | "invalid_quantity"
   | "cart_problems"
   | "price_changed"
+  | "invalid_city"
+  | "rate_limited"
   | "server_error";
 
 export type PlaceOrderResult =
@@ -81,5 +101,32 @@ export interface CustomerOrder {
     unitPrice: number;
     lineTotal: number;
     image: string | null;
+  }[];
+}
+
+export type TrackResult =
+  | { ok: true; order: TrackedOrder }
+  | { ok: false; code: "invalid_input" | "not_found" | "rate_limited" | "not_configured" | "server_error" };
+
+/** What /track-order may show. No ids, no address, phone masked. */
+export interface TrackedOrder {
+  orderNumber: string;
+  status: string;
+  paymentStatus: string;
+  paymentMethod: string;
+  createdAt: string;
+  updatedAt: string;
+  city: string;
+  phoneMasked: string;
+  subtotal: number;
+  shipping: number;
+  total: number;
+  items: {
+    name: string;
+    size: string | null;
+    color: string | null;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
   }[];
 }

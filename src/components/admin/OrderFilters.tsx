@@ -87,6 +87,16 @@ export function OrderFilters() {
           />
         </div>
         <div className="admin-field">
+          <label htmlFor="o-notify">Notification</label>
+          <select id="o-notify" defaultValue={params.get("notify") ?? "all"} onChange={(e) => set("notify", e.target.value)}>
+            {["all", "sent", "failed", "skipped"].map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="admin-field">
           <label htmlFor="o-from">From</label>
           <input id="o-from" type="date" defaultValue={params.get("from") ?? ""} onChange={(e) => set("from", e.target.value)} />
         </div>

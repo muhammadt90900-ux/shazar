@@ -4,9 +4,14 @@ import { requireAdminPage, isDenied } from "@/lib/admin/guard";
 import { AdminNav } from "@/components/admin/AdminNav";
 import { StatusPill } from "@/components/admin/Flash";
 import { OrderFilters } from "@/components/admin/OrderFilters";
-import { formatIraqPhone, listOrders, type OrderFilters as Filters } from "@/lib/admin/orders";
+import {
+  formatIraqPhone,
+  listOrders,
+  notificationSummary,
+  type OrderFilters as Filters,
+  type OrderListRow,
+} from "@/lib/admin/orders";
 import { formatPrice } from "@/lib/format";
-import type { OrderRow } from "@/types/database";
 
 export const metadata = { title: "Orders" };
 
@@ -26,7 +31,7 @@ export default async function AdminOrdersPage({ searchParams }: { searchParams: 
 
   const params = await searchParams;
 
-  let result: { rows: OrderRow[]; count: number; page: number; pages: number } = {
+  let result: { rows: OrderListRow[]; count: number; page: number; pages: number } = {
     rows: [],
     count: 0,
     page: 1,
@@ -39,7 +44,9 @@ export default async function AdminOrdersPage({ searchParams }: { searchParams: 
     error = "Could not load orders. Check that migration 0006_orders.sql has run.";
   }
 
-  const filtered = Boolean(params.q || params.status || params.payment || params.city || params.from || params.to);
+  const filtered = Boolean(
+    params.q || params.status || params.payment || params.city || params.from || params.to || params.notify,
+  );
 
   const pageHref = (p: number) => {
     const qs = new URLSearchParams();
@@ -84,9 +91,11 @@ export default async function AdminOrdersPage({ searchParams }: { searchParams: 
                     <th>Customer</th>
                     <th>Phone</th>
                     <th>City</th>
+                    <th className="num">Shipping</th>
                     <th className="num">Total</th>
                     <th>Payment</th>
                     <th>Status</th>
+                    <th>Notified</th>
                     <th className="num">Placed</th>
                   </tr>
                 </thead>
@@ -101,6 +110,7 @@ export default async function AdminOrdersPage({ searchParams }: { searchParams: 
                         <a href={`tel:${o.customer_phone}`}>{formatIraqPhone(o.customer_phone)}</a>
                       </td>
                       <td>{o.customer_city}</td>
+                      <td className="num admin-label">{formatPrice(o.shipping_iqd)}</td>
                       <td className="num">{formatPrice(o.total_iqd)}</td>
                       <td>
                         <span className="admin-label" style={{ display: "block", marginBottom: 3 }}>
@@ -110,6 +120,16 @@ export default async function AdminOrdersPage({ searchParams }: { searchParams: 
                       </td>
                       <td>
                         <StatusPill status={o.status} />
+                      </td>
+                      <td>
+                        {(() => {
+                          const n = notificationSummary(o.notification_logs ?? []);
+                          return (
+                            <span className="admin-pill" data-tone={`n-${n}`}>
+                              {n}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="num admin-label">{dateTime(o.created_at)}</td>
                     </tr>

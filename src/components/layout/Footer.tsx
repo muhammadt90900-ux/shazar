@@ -28,6 +28,8 @@ const COLUMNS = [
       { href: "/story", label: "Story" },
       { href: "/kurdish", label: "Kurdistan" },
       { href: "/contact", label: "Contact" },
+      // customers who closed the confirmation page need a way back to it
+      { href: "/track-order", label: "Track order" },
     ],
   },
 ];

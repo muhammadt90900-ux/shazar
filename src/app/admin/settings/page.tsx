@@ -30,6 +30,15 @@ export default async function AdminSettingsPage() {
       <main className="admin-main admin-stack">
         <h1>Settings</h1>
 
+        <div className="admin-row">
+          <Link href="/admin/settings/notifications" className="admin-btn">
+            Notifications
+          </Link>
+          <Link href="/admin/shipping" className="admin-btn">
+            Shipping rates
+          </Link>
+        </div>
+
         <div className="admin-panel">
           <table className="admin-table">
             <tbody>

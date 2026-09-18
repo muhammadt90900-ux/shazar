@@ -38,8 +38,11 @@ export const copy = {
     phoneHint: { en: "An Iraqi mobile, e.g. 0750 123 4567", ku: "ژمارەی مۆبایلی عێراقی" },
     city: { en: "City", ku: "شار" },
     cityChoose: { en: "Choose a city", ku: "شارێک هەڵبژێرە" },
-    cityOther: { en: "Other", ku: "شاری تر" },
-    cityOtherLabel: { en: "Your city", ku: "ناوی شارەکەت" },
+    cityHint: {
+      en: "We deliver to the cities listed. Not there? Message us on WhatsApp.",
+      ku: "بۆ ئەم شارانە دەگەیەنین. شارەکەت لێرە نییە؟ لە واتسئاپ نامەمان بۆ بنێرە.",
+    },
+    shippingChoose: { en: "Choose a city", ku: "شارێک هەڵبژێرە" },
     address: { en: "Address", ku: "ناونیشان" },
     addressHint: {
       en: "Neighbourhood, street, building, house number — anything that helps the courier.",
@@ -50,6 +53,7 @@ export const copy = {
     subtotal: { en: "Subtotal", ku: "کۆی بەرهەمەکان" },
     shipping: { en: "Shipping", ku: "گەیاندن" },
     shippingFree: { en: "Free", ku: "بەخۆڕایی" },
+    shippingTo: (city: string): Bi => ({ en: `Shipping to ${city}`, ku: `گەیاندن بۆ ${city}` }),
     total: { en: "Total", ku: "کۆی گشتی" },
     place: { en: "Place order", ku: "ناردنی داواکاری" },
     placing: { en: "Placing order…", ku: "ناردن…" },
@@ -121,6 +125,14 @@ export const copy = {
       en: "Some items in your bag changed. Nothing was ordered — please review your bag and try again.",
       ku: "هەندێک بەرهەم گۆڕاون. هیچ داواکارییەک نەنێردرا — سەبەتەکەت بپشکنە و دووبارە هەوڵ بدەرەوە.",
     },
+    invalid_city: {
+      en: "Please choose a city from the list — delivery to the one selected is not available right now.",
+      ku: "تکایە شارێک لە لیستەکە هەڵبژێرە — گەیاندن بۆ ئەو شارە ئێستا بەردەست نییە.",
+    },
+    rate_limited: {
+      en: "Too many order attempts. Please wait a few minutes and try again.",
+      ku: "هەوڵی زۆر درا. تکایە چەند خولەکێک چاوەڕێ بکە و دووبارە هەوڵ بدەرەوە.",
+    },
     price_changed: {
       en: "A price changed since you added it. Your total has been updated — please check it and place the order again.",
       ku: "نرخێک گۆڕاوە. کۆی گشتی نوێکرایەوە — بیپشکنە و دووبارە داواکاری بنێرە.",
@@ -165,7 +177,60 @@ export const copy = {
       ku: "بۆ پاراستنی تایبەتمەندیت، داواکاری تەنها لەو ئامێرەی کە پێی نێردراوە دەبینرێت. ئەگەر تۆ ناردووتە، داواکارییەکەت پارێزراوە — ژمارەی داواکارییەکەمان بۆ بنێرە.",
     },
     contact: { en: "Contact us", ku: "پەیوەندیمان پێوە بکە" },
+    track: { en: "Track order", ku: "بەدواداچوونی داواکاری" },
   },
+
+  track: {
+    title: { en: "Track your order", ku: "بەدواداچوونی داواکارییەکەت" },
+    intro: {
+      en: "Enter the order number from your confirmation and the phone number you ordered with.",
+      ku: "ژمارەی داواکاری و ئەو ژمارە مۆبایلەی کە داواکارییەکەت پێ ناردووە بنووسە.",
+    },
+    number: { en: "Order number", ku: "ژمارەی داواکاری" },
+    phone: { en: "Phone number", ku: "ژمارەی مۆبایل" },
+    submit: { en: "Track order", ku: "بەدواداچوون" },
+    checking: { en: "Looking up…", ku: "گەڕان…" },
+    invalid: {
+      en: "Enter an order number like SHA-20260917-0001 and an Iraqi mobile number.",
+      ku: "ژمارەی داواکاری وەک SHA-20260917-0001 و ژمارەی مۆبایلی عێراقی بنووسە.",
+    },
+    notFound: {
+      en: "We couldn't find an order with that number and phone. Check both and try again.",
+      ku: "داواکارییەک بەو ژمارە و مۆبایلە نەدۆزرایەوە. هەردووکیان بپشکنە و دووبارە هەوڵ بدەرەوە.",
+    },
+    rateLimited: {
+      en: "Too many attempts. Please wait a few minutes and try again.",
+      ku: "هەوڵی زۆر درا. چەند خولەکێک چاوەڕێ بکە.",
+    },
+    unavailable: {
+      en: "Order tracking is not available right now. Please try again later.",
+      ku: "بەدواداچوون ئێستا بەردەست نییە. دواتر هەوڵ بدەرەوە.",
+    },
+    placed: { en: "Placed", ku: "نێردرا" },
+    current: { en: "Current status", ku: "دۆخی ئێستا" },
+    now: { en: "Now", ku: "ئێستا" },
+    updated: { en: "Last update", ku: "دوایین نوێکردنەوە" },
+    cancelledNote: {
+      en: "This order was cancelled. If that is unexpected, message us with the order number.",
+      ku: "ئەم داواکارییە هەڵوەشێنرایەوە. ئەگەر چاوەڕوان نەبوو، ژمارەی داواکارییەکەمان بۆ بنێرە.",
+    },
+    another: { en: "Track another order", ku: "داواکارییەکی تر" },
+  },
+
+  timeline: {
+    ordered: { en: "Ordered", ku: "داواکرا" },
+    confirmed: { en: "Confirmed", ku: "پشتڕاستکرایەوە" },
+    processing: { en: "Processing", ku: "ئامادەکردن" },
+    shipped: { en: "Shipped", ku: "نێردرا" },
+    delivered: { en: "Delivered", ku: "گەیەندرا" },
+    cancelled: { en: "Cancelled", ku: "هەڵوەشێنرایەوە" },
+  },
+
+  payment: {
+    pending: { en: "Pay on delivery", ku: "پارەدان لە کاتی گەیاندن" },
+    paid: { en: "Paid", ku: "پارە دراوە" },
+    failed: { en: "Payment problem", ku: "کێشەی پارەدان" },
+  } as Record<string, Bi>,
 
   status: {
     pending: { en: "Pending", ku: "چاوەڕوان" },

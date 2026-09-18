@@ -138,6 +138,39 @@ export type OrderItemRow = {
   created_at: string;
 };
 
+// ---- phase 5: operations (0007_operations.sql) ---------------------
+
+export type ShippingRateRow = {
+  id: string;
+  city: string;
+  city_ku: string;
+  price_iqd: number;
+  active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NotificationSettingsRow = {
+  id: boolean;
+  telegram_enabled: boolean;
+  whatsapp_enabled: boolean;
+  updated_at: string;
+};
+
+export type NotificationStatus = "pending" | "sent" | "failed" | "skipped";
+
+export type NotificationLogRow = {
+  id: string;
+  order_id: string | null;
+  provider: "telegram" | "whatsapp";
+  event_type: string;
+  status: NotificationStatus;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 /** A product joined with everything a page needs, in one round trip. */
 export type ProductWithRelations = ProductRow & {
   product_images: ProductImageRow[];
@@ -197,6 +230,25 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+      shipping_rates: {
+        Row: ShippingRateRow;
+        Insert: Partial<ShippingRateRow>;
+        Update: Partial<ShippingRateRow>;
+        Relationships: [];
+      };
+      notification_settings: {
+        Row: NotificationSettingsRow;
+        Insert: never;
+        Update: Partial<NotificationSettingsRow>;
+        Relationships: [];
+      };
+      /** Read-only for admins; written only by the 0007 functions. */
+      notification_logs: {
+        Row: NotificationLogRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -233,6 +285,37 @@ export interface Database {
       admin_order_counts: {
         Args: Record<string, never>;
         Returns: unknown;
+      };
+      /** 0007 */
+      hit_rate_limit: {
+        Args: { p_bucket: string; p_key_hash: string; p_limit: number; p_window_seconds: number };
+        Returns: boolean;
+      };
+      track_order: {
+        Args: { p_order_number: string; p_phone: string };
+        Returns: unknown;
+      };
+      claim_notification: {
+        Args: { p_order_number: string; p_access_token: string | null; p_provider: string; p_event: string };
+        Returns: unknown;
+      };
+      finish_notification: {
+        Args: {
+          p_log_id: string;
+          p_order_number: string;
+          p_access_token: string | null;
+          p_status: string;
+          p_error: string | null;
+        };
+        Returns: boolean;
+      };
+      admin_retry_notification: {
+        Args: { p_log_id: string };
+        Returns: boolean;
+      };
+      admin_log_test_notification: {
+        Args: { p_provider: string; p_status: string; p_error: string | null };
+        Returns: undefined;
       };
     };
     Enums: { product_status: ProductStatus; collection_status: CollectionStatus };

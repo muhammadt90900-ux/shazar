@@ -1,6 +1,5 @@
 import { normalizeIraqPhone } from "./phone";
 import { LIMITS } from "./limits";
-import { OTHER_CITY } from "./cities";
 
 /**
  * Customer fields, validated the same way in the browser (for speed)
@@ -10,7 +9,6 @@ export interface CustomerInput {
   name: string;
   phone: string;
   city: string;
-  cityOther: string;
   address: string;
   notes: string;
 }
@@ -53,8 +51,10 @@ export function validateCustomer(input: Partial<CustomerInput>): {
   const phone = normalizeIraqPhone(typeof input.phone === "string" ? input.phone : "");
   if (!phone) errors.phone = "phone_invalid";
 
-  const picked = squash(input.city);
-  const city = picked === OTHER_CITY ? squash(input.cityOther) : picked;
+  // Only the format is checked here. Whether the city is an active
+  // shipping destination is decided by the database when the order is
+  // placed — the list can change while the page is open.
+  const city = squash(input.city);
   if (city.length < LIMITS.cityMin || city.length > LIMITS.cityMax) errors.city = "city_required";
 
   const address = keepLines(input.address);
