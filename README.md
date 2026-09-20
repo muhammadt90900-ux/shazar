@@ -566,9 +566,60 @@ origin. Nothing in the code changes.
   *Mark paid by hand*, with a note. It is recorded as a manual
   reconciliation.
 
+### Provider statuses and errors (hardened in 6.1)
+
+Only a verified success is ever `paid`. The translation from each
+provider's words to ours lives in one small file per provider —
+`fib-status.ts` and `fastpay-status.ts` — and both are covered by unit
+tests (`npm test`).
+
+**FIB**
+
+    PAID                              → paid
+    UNPAID                            → pending
+    DECLINED + PAYMENT_EXPIRATION     → expired   (order released, stock back)
+    DECLINED + PAYMENT_CANCELLATION   → cancelled (order released, stock back)
+    DECLINED + anything else          → failed    (order released, stock back)
+    REFUND_REQUESTED / REFUNDED       → recorded, never applied
+    anything unrecognised             → recorded, never applied
+
+A refund state says money moved *back*, so it can never settle a
+payment; an unrecognised status is not guessed at either way. Both are
+written into the payment history with exactly what the provider said,
+and the payment is left as it was for a person to look at.
+
+**FastPay**
+
+FastPay answers HTTP 200 even for failures, with the outcome in the JSON
+`code`. These are now separate things:
+
+    code 200 + status Success         → paid (after the amount check)
+    code 404/400 "transaction not
+      found / not paid"               → pending, the customer has not paid yet
+    code 401/403, HTTP 401/403        → configuration error (wrong store
+                                        credentials) — NOT pending
+    HTTP 5xx, gateway code 5xx        → provider error — NOT pending
+    timeout, network failure          → provider unavailable — NOT pending
+    unreadable body, missing fields   → invalid response — NOT paid
+
+**What an error does.** Nothing to the payment. It is recorded in
+`payment_events` with the kind (`auth`, `provider`, `unavailable`,
+`invalid_response`) and a short safe message, so `/admin/payments` shows
+why a payment is not moving. The customer only ever sees a general
+message — never a provider error, a status code or a credential.
+
+### Tests
+
+    npm test        unit tests for both status mappers (Node's own test
+                    runner; needs Node 22.6+ for TypeScript stripping)
+
+Provider behaviour beyond that has been exercised against local test
+doubles, not against real FastPay or FIB accounts — see PHASE6_REPORT.md
+and PHASE6_1_REPORT.md.
+
 ### Not built
 
-Refunds (both providers support them; this phase does not), partial
+Refunds (both providers support them; this project does not), partial
 payments, saved cards, customer accounts, coupons.
 
 ## Project layout

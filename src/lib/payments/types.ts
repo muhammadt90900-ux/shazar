@@ -11,8 +11,34 @@
 export type ProviderName = "fastpay" | "fib";
 export type PaymentMethod = "cash_on_delivery" | ProviderName;
 
-/** Our own vocabulary. Each provider maps its words onto these. */
-export type NormalizedStatus = "pending" | "paid" | "failed" | "cancelled" | "expired" | "unknown";
+/**
+ * Our own vocabulary. Each provider maps its words onto these.
+ *
+ * "refunded" and "unknown" are deliberately NOT settlement states: they
+ * are recorded in the payment history and change nothing. A refund must
+ * never make an unpaid order look paid, and a status we have never seen
+ * before is not a guess worth taking either way.
+ */
+export type NormalizedStatus =
+  | "pending"
+  | "paid"
+  | "failed"
+  | "cancelled"
+  | "expired"
+  | "refunded"
+  | "unknown";
+
+/**
+ * Why a provider call did not produce an answer. The distinction
+ * matters: "the customer has not paid yet" and "we could not ask" look
+ * the same to a naive reader and must never be treated the same way.
+ *
+ *   auth             credentials or merchant configuration rejected
+ *   provider         the provider answered with a failure of its own
+ *   unavailable      timeout, network, provider unreachable
+ *   invalid_response the answer could not be understood
+ */
+export type ProviderErrorKind = "auth" | "provider" | "unavailable" | "invalid_response";
 
 export interface CreatePaymentInput {
   /** our order number, SHA-YYYYMMDD-NNNN — the provider's reference */
@@ -48,6 +74,10 @@ export interface CreatePaymentResult {
 
 export interface ProviderStatus {
   status: NormalizedStatus;
+  /** exactly what the provider said, for the audit trail */
+  providerStatus: string | null;
+  /** the provider's own reason, where it gives one */
+  providerReason: string | null;
   /** what the provider says was actually paid, in whole dinar */
   amountIqd: number | null;
   currency: string | null;
@@ -57,7 +87,9 @@ export interface ProviderStatus {
   rawEventId: string | null;
 }
 
-export type ProviderResult<T> = { ok: true; value: T } | { ok: false; error: string };
+export type ProviderResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: string; kind: ProviderErrorKind };
 
 export interface PaymentProvider {
   name: ProviderName;

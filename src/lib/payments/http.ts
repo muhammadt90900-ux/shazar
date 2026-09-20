@@ -10,6 +10,8 @@ export interface HttpResult {
   status: number;
   json: unknown;
   error: string | null;
+  /** how the request itself went, before any body was read */
+  transport: "ok" | "timeout" | "network";
 }
 
 export async function httpJson(
@@ -33,10 +35,17 @@ export async function httpJson(
       status: res.status,
       json,
       error: res.ok ? null : `HTTP ${res.status}`,
+      transport: "ok",
     };
   } catch (e) {
-    const name = (e as Error)?.name;
-    return { ok: false, status: 0, json: null, error: name === "TimeoutError" ? "timed out" : "network error" };
+    const timedOut = (e as Error)?.name === "TimeoutError";
+    return {
+      ok: false,
+      status: 0,
+      json: null,
+      error: timedOut ? "timed out" : "network error",
+      transport: timedOut ? "timeout" : "network",
+    };
   }
 }
 

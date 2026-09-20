@@ -1,6 +1,7 @@
 import "server-only";
 
 import { env, httpJson, toWholeDinar } from "./http";
+import { classifyFastpay } from "./fastpay-status";
 import type {
   CreatePaymentInput,
   CreatePaymentResult,
@@ -58,44 +59,12 @@ function credentials() {
   return { store_id: env("FASTPAY_STORE_ID"), store_password: env("FASTPAY_STORE_PASSWORD") };
 }
 
-/** FastPay's own success code; anything else is a failure. */
-function payload(res: { ok: boolean; json: unknown; error: string | null }):
-  | { ok: true; data: Record<string, unknown> }
-  | { ok: false; error: string } {
-  if (!res.ok) return { ok: false, error: res.error ?? "request failed" };
-  const body = res.json as { code?: number; messages?: unknown; data?: Record<string, unknown> } | null;
-  if (!body || Number(body.code) !== 200) {
-    const message = Array.isArray(body?.messages) ? String(body?.messages[0] ?? "") : "";
-    return { ok: false, error: `gateway code ${body?.code ?? "?"}${message ? `: ${message.slice(0, 120)}` : ""}` };
-  }
-  return { ok: true, data: body.data ?? {} };
-}
-
-function normalize(status: string): ProviderStatus["status"] {
-  switch (status?.toLowerCase()) {
-    case "success":
-    case "successful":
-    case "paid":
-      return "paid";
-    case "pending":
-    case "initiated":
-    case "unpaid":
-      return "pending";
-    case "cancel":
-    case "cancelled":
-    case "canceled":
-      return "cancelled";
-    case "failed":
-    case "failure":
-    case "declined":
-      return "failed";
-    case "expired":
-      return "expired";
-    default:
-      return "unknown";
-  }
-}
-
+/**
+ * Every answer from FastPay goes through classifyFastpay (see
+ * fastpay-status.ts), which separates "the customer has not paid yet"
+ * from "we could not ask": bad credentials, a 5xx, a timeout and an
+ * unreadable body are errors, not a pending payment.
+ */
 export const fastpay: PaymentProvider = {
   name: "fastpay",
   label: "FastPay",
@@ -135,12 +104,21 @@ export const fastpay: PaymentProvider = {
       }),
     });
 
-    const body = payload(res);
-    if (!body.ok) return { ok: false, error: body.error };
-
-    const redirect = body.data["redirect_uri"];
+    const verdict = classifyFastpay({
+      transport: res.transport,
+      httpStatus: res.status,
+      body: res.json,
+      expect: "initiation",
+    });
+    if (verdict.kind === "error") {
+      return { ok: false, error: verdict.message, kind: verdict.errorKind };
+    }
+    // initiation answers code 200 with the redirect, and never with a
+    // transaction status, so the data is read straight off the body
+    const data = ((res.json as { data?: Record<string, unknown> } | null)?.data ?? {}) as Record<string, unknown>;
+    const redirect = data["redirect_uri"];
     if (typeof redirect !== "string" || !/^https:\/\//.test(redirect)) {
-      return { ok: false, error: "no redirect url in response" };
+      return { ok: false, error: "no redirect url in response", kind: "invalid_response" };
     }
 
     return {
@@ -164,36 +142,52 @@ export const fastpay: PaymentProvider = {
       body: JSON.stringify({ ...credentials(), order_id: orderId }),
     });
 
-    const body = payload(res);
-    if (!body.ok) {
-      // validate() answers with a non-200 code while nothing has been paid
-      // yet; that is "still waiting", not an outage
-      if (/gateway code/.test(body.error)) {
-        return {
-          ok: true,
-          value: {
-            status: "pending",
-            amountIqd: null,
-            currency: null,
-            providerPaymentId: null,
-            reason: null,
-            rawEventId: null,
-          },
-        };
-      }
-      return { ok: false, error: body.error };
+    const verdict = classifyFastpay({ transport: res.transport, httpStatus: res.status, body: res.json });
+    if (verdict.kind === "error") {
+      // credentials, outage, unreadable answer — never "still unpaid"
+      return { ok: false, error: verdict.message, kind: verdict.errorKind };
+    }
+    if (verdict.kind !== "status") {
+      return { ok: false, error: "FastPay answered without a transaction status", kind: "invalid_response" };
     }
 
-    const d = body.data as Record<string, unknown>;
+    if (verdict.status === "pending" && verdict.providerStatus === null) {
+      // FastPay has no completed transaction for this order yet
+      return {
+        ok: true,
+        value: {
+          status: "pending",
+          providerStatus: null,
+          providerReason: null,
+          amountIqd: null,
+          currency: null,
+          providerPaymentId: null,
+          reason: verdict.note,
+          rawEventId: null,
+        },
+      };
+    }
+
+    const d = ((res.json as { data?: Record<string, unknown> } | null)?.data ?? {}) as Record<string, unknown>;
     const transactionId = (d["gw_transaction_id"] ?? d["transaction_id"] ?? null) as string | null;
+    const amount = toWholeDinar(d["received_amount"]);
+
+    // A "paid" with no readable amount cannot be settled — settle_payment
+    // would refuse it anyway, but it is a broken answer, not a payment.
+    if (verdict.status === "paid" && amount === null) {
+      return { ok: false, error: "FastPay reported success without a readable amount", kind: "invalid_response" };
+    }
+
     return {
       ok: true,
       value: {
-        status: normalize(String(d["status"] ?? "")),
-        amountIqd: toWholeDinar(d["received_amount"]),
+        status: verdict.status,
+        providerStatus: verdict.providerStatus,
+        providerReason: null,
+        amountIqd: amount,
         currency: typeof d["currency"] === "string" ? (d["currency"] as string) : null,
         providerPaymentId: typeof transactionId === "string" ? transactionId : null,
-        reason: null,
+        reason: verdict.note,
         rawEventId: typeof transactionId === "string" ? transactionId : null,
       },
     };

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { env, httpJson, toWholeDinar } from "./http";
+import { classifyFibHttp, mapFibStatus } from "./fib-status";
 import type {
   CreatePaymentInput,
   CreatePaymentResult,
@@ -63,7 +64,13 @@ async function accessToken(): Promise<ProviderResult<string>> {
       | { access_token?: string; expires_in?: number }
       | null;
     if (!res.ok || !json?.access_token) {
-      return { ok: false, error: `authentication failed (HTTP ${res.status})` };
+      return {
+        ok: false,
+        error: `authentication failed (HTTP ${res.status})`,
+        // wrong client id or secret is a configuration problem, never a
+        // customer who has not paid
+        kind: res.status === 401 || res.status === 403 ? "auth" : classifyFibHttp(res.status),
+      };
     }
     token = {
       value: json.access_token,
@@ -71,27 +78,13 @@ async function accessToken(): Promise<ProviderResult<string>> {
     };
     return { ok: true, value: token.value };
   } catch (e) {
-    return { ok: false, error: (e as Error)?.name === "TimeoutError" ? "timed out" : "network error" };
+    const timedOut = (e as Error)?.name === "TimeoutError";
+    return { ok: false, error: timedOut ? "timed out" : "network error", kind: "unavailable" };
   }
 }
 
 /** minutes -> ISO-8601 duration, which is what FIB expects */
 const isoDuration = (minutes: number) => `PT${Math.max(1, Math.round(minutes))}M`;
-
-function normalize(status: string): ProviderStatus["status"] {
-  switch (status?.toUpperCase()) {
-    case "PAID":
-    case "REFUND_REQUESTED":
-    case "REFUNDED":
-      return "paid";
-    case "UNPAID":
-      return "pending";
-    case "DECLINED":
-      return "failed";
-    default:
-      return "unknown";
-  }
-}
 
 export const fib: PaymentProvider = {
   name: "fib",
@@ -123,7 +116,13 @@ export const fib: PaymentProvider = {
       }),
     });
 
-    if (!res.ok) return { ok: false, error: res.error ?? "payment could not be created" };
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: res.error ?? "payment could not be created",
+        kind: res.transport === "ok" ? classifyFibHttp(res.status) : "unavailable",
+      };
+    }
 
     const body = res.json as {
       paymentId?: string;
@@ -135,7 +134,7 @@ export const fib: PaymentProvider = {
       corporateAppLink?: string;
     } | null;
 
-    if (!body?.paymentId) return { ok: false, error: "no payment id in response" };
+    if (!body?.paymentId) return { ok: false, error: "no payment id in response", kind: "invalid_response" };
 
     return {
       ok: true,
@@ -158,7 +157,7 @@ export const fib: PaymentProvider = {
   },
 
   async getPaymentStatus({ providerPaymentId }): Promise<ProviderResult<ProviderStatus>> {
-    if (!providerPaymentId) return { ok: false, error: "no provider payment id" };
+    if (!providerPaymentId) return { ok: false, error: "no provider payment id", kind: "invalid_response" };
     const auth = await accessToken();
     if (!auth.ok) return auth;
 
@@ -166,7 +165,13 @@ export const fib: PaymentProvider = {
       method: "GET",
       headers: { authorization: `Bearer ${auth.value}` },
     });
-    if (!res.ok) return { ok: false, error: res.error ?? "status check failed" };
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: res.error ?? "status check failed",
+        kind: res.transport === "ok" ? classifyFibHttp(res.status) : "unavailable",
+      };
+    }
 
     const body = res.json as {
       paymentId?: string;
@@ -175,18 +180,21 @@ export const fib: PaymentProvider = {
       decliningReason?: string;
     } | null;
 
-    const status = normalize(body?.status ?? "");
-    // FIB says why a payment was declined; PAYMENT_EXPIRATION is its own
-    // outcome on our side, because the order must be released
-    const reason = body?.decliningReason ?? null;
+    // One translation, in one place: fib-status.ts. PAID is the only
+    // path to paid; a decline becomes expired / cancelled / failed by its
+    // reason, a refund state is recorded and not applied, and anything
+    // unrecognised stays unknown rather than being guessed at.
+    const mapped = mapFibStatus(body?.status, body?.decliningReason);
     return {
       ok: true,
       value: {
-        status: status === "failed" && reason === "PAYMENT_EXPIRATION" ? "expired" : status,
+        status: mapped.status,
+        providerStatus: typeof body?.status === "string" ? body.status : null,
+        providerReason: body?.decliningReason ?? null,
         amountIqd: toWholeDinar(body?.amount?.amount),
         currency: body?.amount?.currency ?? null,
         providerPaymentId: body?.paymentId ?? providerPaymentId,
-        reason,
+        reason: mapped.note,
         rawEventId: body?.paymentId ?? null,
       },
     };
@@ -199,7 +207,13 @@ export const fib: PaymentProvider = {
       method: "POST",
       headers: { authorization: `Bearer ${auth.value}` },
     });
-    return res.ok ? { ok: true, value: undefined } : { ok: false, error: res.error ?? "cancel failed" };
+    return res.ok
+      ? { ok: true, value: undefined }
+      : {
+          ok: false,
+          error: res.error ?? "cancel failed",
+          kind: res.transport === "ok" ? classifyFibHttp(res.status) : "unavailable",
+        };
   },
 
   /**

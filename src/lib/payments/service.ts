@@ -52,6 +52,7 @@ export async function startPayment(input: StartPaymentInput): Promise<StartPayme
 
   let created: CreatePaymentResult | null = null;
   let error: string | null = null;
+  let errorKind: string | null = null;
   try {
     const result = await provider.createPayment({
       orderNumber: input.orderNumber,
@@ -64,18 +65,24 @@ export async function startPayment(input: StartPaymentInput): Promise<StartPayme
       items: input.items,
     });
     if (result.ok) created = result.value;
-    else error = result.error;
+    else {
+      error = result.error;
+      errorKind = result.kind;
+    }
   } catch {
     error = "provider request failed";
+    errorKind = "unavailable";
   }
 
   if (!created) {
-    console.error(`[payments] ${input.method} create failed: ${error ?? "unknown"}`);
+    // The customer only ever sees a generic message; the reason lives in
+    // the server log and in the payment's own history.
+    console.error(`[payments] ${input.method} create failed (${errorKind ?? "unknown"}): ${error ?? "unknown"}`);
     await supabase.rpc("abandon_payment", {
       p_payment_id: input.paymentId,
       p_order_number: input.orderNumber,
       p_access_token: input.accessToken,
-      p_reason: `could not be started: ${(error ?? "unknown").slice(0, 200)}`,
+      p_reason: `could not be started (${errorKind ?? "unknown"}): ${(error ?? "unknown").slice(0, 160)}`,
       p_status: "failed",
     });
     return { ok: false, error: error ?? "provider unavailable" };
@@ -184,12 +191,37 @@ export async function verifyPayment(
   });
 
   if (!status.ok) {
-    console.error(`[payments] ${payment.provider} status failed: ${status.error}`);
-    // a provider we cannot reach leaves the payment exactly as it was
-    return { status: "unknown", paymentStatus: payment.status, orderNumber, changed: false };
+    // Bad credentials, an outage, an unreadable answer — none of these is
+    // a customer who has not paid, and none of them changes the payment.
+    // They are recorded so an admin can see why nothing is moving.
+    console.error(`[payments] ${payment.provider} status failed (${status.kind}): ${status.error}`);
+    await service.rpc("log_payment_check", {
+      p_payment_id: payment.id,
+      p_status: status.kind,
+      p_note: `provider ${status.kind}: ${status.error}`.slice(0, 300),
+    });
+    return {
+      status: "unknown",
+      paymentStatus: payment.status,
+      orderNumber,
+      changed: false,
+      reason: status.kind,
+    };
   }
 
   const s = status.value;
+
+  // A refund state, or a status this app has never seen, is never a
+  // settlement. It is written into the history with exactly what the
+  // provider said, and the payment is left alone for a person to judge.
+  if (s.status === "refunded" || s.status === "unknown") {
+    await service.rpc("log_payment_check", {
+      p_payment_id: payment.id,
+      p_status: (s.providerStatus ?? s.status).slice(0, 20),
+      p_note: (s.reason ?? `provider status ${s.providerStatus ?? "unrecognised"} not applied`).slice(0, 300),
+    });
+    return { status: s.status, paymentStatus: payment.status, orderNumber, changed: false, reason: s.reason };
+  }
 
   if (s.status === "paid") {
     const { data: settled } = await service.rpc("settle_payment", {
@@ -223,7 +255,7 @@ export async function verifyPayment(
       p_status: s.status,
       p_amount_iqd: null,
       p_currency: "IQD",
-      p_reason: s.reason ?? s.status,
+      p_reason: (s.reason ?? s.status).slice(0, 300),
       p_raw_event_id: s.rawEventId,
       p_source: "status_check",
     });
@@ -246,7 +278,11 @@ export async function verifyPayment(
     return { status: "expired", paymentStatus: "expired", orderNumber, changed: true };
   }
 
-  await service.rpc("log_payment_check", { p_payment_id: payment.id, p_status: s.status, p_note: null });
+  await service.rpc("log_payment_check", {
+    p_payment_id: payment.id,
+    p_status: (s.providerStatus ?? s.status).slice(0, 20),
+    p_note: s.reason,
+  });
   return { status: "pending", paymentStatus: payment.status, orderNumber, changed: false };
 }
 
