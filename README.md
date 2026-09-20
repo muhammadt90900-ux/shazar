@@ -39,7 +39,7 @@ phase, and it must never carry a `NEXT_PUBLIC_` prefix.
 
 ## 3. Run the migrations
 
-Seven files in `supabase/migrations/`, in order:
+Eight files in `supabase/migrations/`, in order:
 
     0001_initial_schema.sql    tables, indexes, triggers, is_admin()
     0002_rls_policies.sql      row level security
@@ -49,6 +49,7 @@ Seven files in `supabase/migrations/`, in order:
     0006_orders.sql            orders, order items, checkout functions
     0007_operations.sql        shipping rates, tracking, rate limits,
                                notification settings and log
+    0008_payments.sql          online payments: FastPay and FIB
 
 **Upgrading an existing project:** run any migration you have not run
 yet, in order, in the SQL Editor *before* deploying the code that needs
@@ -64,7 +65,7 @@ in order → Run.
     supabase link --project-ref <your-ref>
     supabase db push
 
-All seven are idempotent: running them twice changes nothing.
+All eight are idempotent: running them twice changes nothing.
 
 ## 4. Seed data
 
@@ -134,6 +135,7 @@ A product is invisible to the public until `status = 'active'`.
     /admin/collections
     /admin/orders             orders, filters, order detail
     /admin/shipping           per-city shipping prices
+    /admin/payments           online payments, with an audit trail
     /admin/settings           /admin/settings/notifications
 
 Roles are granted in SQL, not from this screen — see "Creating the first
@@ -434,16 +436,153 @@ Nothing new is required. Everything in this section is optional:
 `TELEGRAM_*`, `WHATSAPP_*`, `RATE_LIMIT_SECRET`. See `.env.example`.
 There is still no service-role key anywhere in the project.
 
+## 10. Online payments — FastPay and FIB (phase 6)
+
+Cash on delivery is unchanged and always available. Two online methods
+join it when they are configured.
+
+### The rule everything else follows
+
+An order becomes **paid** only when this server has asked FastPay or FIB
+itself and the answer matched the order's own total. Nothing else can do
+it: not the customer's browser, not a callback body, not the success
+page they land on. A callback tells this server *which* payment to go and
+ask about — never what happened to it.
+
+That is also why online payment needs `SUPABASE_SERVICE_ROLE_KEY`. Row
+Level Security can say "an admin may read orders"; it cannot say "this
+caller has just spoken to the bank", because the database cannot make an
+HTTP request. So the functions that settle a payment are granted to the
+service role alone, and that key lives only on the server
+(`src/lib/supabase/service.ts`). Without it the online methods are not
+offered at all.
+
+### Flow
+
+    checkout (customer picks FastPay or FIB)
+      → place_order: validates the cart, computes subtotal + shipping,
+        creates the order AND its payment row in one transaction, with
+        the amount it just computed, and takes the stock
+      → provider createPayment for that exact amount
+      → FastPay: browser goes to FastPay's hosted page
+        FIB:     browser stays on /payment/pending, which shows the QR,
+                 the readable code and the FIB app link
+      → provider callback (/api/payments/fastpay/ipn,
+        /api/payments/fib/callback) or the customer's "check payment"
+        button, or the expiry sweep
+      → verifyPayment: asks the provider, then settle_payment re-checks
+        amount, currency and the provider's payment id
+      → paid: order becomes confirmed, the shop is notified once
+
+If the provider cannot be reached at checkout, the order is cancelled,
+the stock goes back, the bag is left intact and the customer is told —
+no half-made paid order is ever left behind.
+
+### Stock
+
+Online orders reserve stock the moment the order is created, exactly as
+cash-on-delivery orders do, and hold it for **30 minutes**. If the
+payment fails, is cancelled or expires, the stock is restored **once** —
+the same `stock_restored_at` guard phase 4 uses, under a row lock. Two
+customers can never buy the same last piece, and a late "paid" for a
+payment that has already been released is refused and recorded rather
+than applied.
+
+Point a scheduler at `/api/payments/sweep` every few minutes so expired
+payments are released promptly (Vercel Cron works). Protect it with
+`PAYMENT_SWEEP_SECRET`.
+
+### Payment states
+
+    payments.status   pending → processing → paid
+                                           → failed | cancelled | expired
+    orders.payment_status  pending → paid | failed | expired | cancelled
+
+Everything that happens to a payment — created, provider created,
+callback, status check, paid, refused, reconciled — is a row in
+`payment_events`. No provider payload, no credentials: only status,
+amount, a short note and the provider's reference.
+
+### FastPay setup
+
+1. Get a merchant account (merchant.fast-pay.iq). Store Configuration
+   gives `FASTPAY_STORE_ID` and `FASTPAY_STORE_PASSWORD`.
+2. Set the store's IPN URL to
+   `{PAYMENT_CALLBACK_BASE_URL}/api/payments/fastpay/ipn`.
+3. Keep `FASTPAY_ENVIRONMENT=staging` until you have tested; switch to
+   `production` when FastPay approves the store.
+
+FastPay's IPN is sent for successful payments only and is not signed, so
+this app always re-validates through FastPay's validation API before
+believing anything. FastPay has no cancel API: a customer who backs out
+returns to `/payment/failed`, and the order is released here.
+
+### FIB setup
+
+1. Register for FIB's sandbox (fib.iq/integrations/web-payments) →
+   `FIB_CLIENT_ID`, `FIB_CLIENT_SECRET`, with
+   `FIB_API_URL=https://fib.stage.fib.iq`.
+2. Test creating and checking a payment.
+3. Submit FIB's integration request form for production credentials, then
+   change `FIB_API_URL` and the two credentials. Nothing else changes.
+
+FIB calls `{PAYMENT_CALLBACK_BASE_URL}/api/payments/fib/callback` with
+`{ id, status }` whenever a payment changes; the status in that body is
+ignored and FIB is asked directly.
+
+### Testing a payment
+
+1. Run `0008_payments.sql`, set the environment variables, redeploy.
+2. Check `/admin/payments` loads and `/checkout` now shows the method.
+3. Place a small order with the sandbox credentials and pay it in the
+   sandbox app. The order should become **paid / confirmed**, a Telegram
+   message should arrive, and `/admin/payments` should show `paid` with a
+   masked reference.
+4. Place another one and do not pay it. After 30 minutes (or after
+   calling `/api/payments/sweep`) it should read `expired`, the order
+   `cancelled`, and the stock should be back.
+5. Track both at `/track-order` with the order number and phone.
+
+### Switching to production
+
+Change `FASTPAY_ENVIRONMENT` to `production` (or `FASTPAY_API_URL` to the
+production host) and `FIB_API_URL` to FIB's production host, and replace
+both sets of credentials with the production ones the providers issue.
+Update the IPN URL in the FastPay merchant panel to the production
+origin. Nothing in the code changes.
+
+### Troubleshooting
+
+- **The method is missing at checkout** — credentials,
+  `PAYMENT_CALLBACK_BASE_URL` or `SUPABASE_SERVICE_ROLE_KEY` is unset.
+- **Payment stays "processing"** — the callback is not reaching the site
+  (check the IPN URL and that the origin is public). The customer's
+  "check payment status" button and `/admin/payments` → *Check with
+  provider* both work without callbacks.
+- **"amount mismatch" in the payment history** — the provider reported a
+  different amount than the order total. Nothing is marked paid; look at
+  the event, and reconcile by hand only if the money really arrived.
+- **Money arrived but the order is unpaid** — `/admin/orders/[id]` →
+  *Mark paid by hand*, with a note. It is recorded as a manual
+  reconciliation.
+
+### Not built
+
+Refunds (both providers support them; this phase does not), partial
+payments, saved cards, customer accounts, coupons.
+
 ## Project layout
 
-    src/app/                routes
-    src/components/         UI, unchanged by the database work
+    src/app/                routes, including /payment and the payment
+                            callback routes under /api/payments
+    src/components/         UI, unchanged by the payment work
     src/lib/data/catalog.ts the one data-access boundary
     src/lib/checkout/       cart limits, validation, copy, server actions
+    src/lib/payments/       provider abstraction, FastPay, FIB, verification
     src/lib/notifications/  providers, message format, dispatch
     src/lib/rate-limit.ts   per-IP limiting
     src/lib/admin/          admin queries, validation and actions
-    src/lib/supabase/       env gate, server client, storage URLs
+    src/lib/supabase/       env gate, server client, service client, storage
     src/types/database.ts   row shapes
     src/lib/types.ts        domain types the UI uses
     src/data/               the local catalogue — fallback, and the
@@ -452,7 +591,7 @@ There is still no service-role key anywhere in the project.
 
 ## Not built yet
 
-Online payment (ZainCash, FastPay), customer accounts and order history,
-coupons, reviews, shipping-company integration. Checkout and tracking
-need Supabase: with the local catalogue only, `/checkout` says ordering
-is unavailable rather than pretending.
+Refunds, customer accounts and order history, coupons, reviews,
+shipping-company integration. Checkout, tracking and payments need
+Supabase: with the local catalogue only, `/checkout` says ordering is
+unavailable rather than pretending.

@@ -8,6 +8,13 @@ const HEADLINE: Record<OrderEvent, string> = {
   order_shipped: "🚚 SHAZAR ORDER SHIPPED",
   order_delivered: "📦 SHAZAR ORDER DELIVERED",
   order_cancelled: "✖️ SHAZAR ORDER CANCELLED",
+  payment_received: "💳 SHAZAR PAYMENT RECEIVED",
+};
+
+const PAYMENT_LABEL: Record<string, string> = {
+  cash_on_delivery: "Cash on Delivery",
+  fastpay: "FastPay",
+  fib: "FIB",
 };
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -42,8 +49,8 @@ export function orderMessage(event: OrderEvent, o: OrderSummary): string {
     `Shipping: ${formatPrice(o.shipping)}`,
     `Total: ${formatPrice(o.total)}`,
     "",
-    `Payment: ${o.paymentMethod === "cash_on_delivery" ? "Cash on Delivery" : o.paymentMethod}`,
-    `Status: ${cap(o.status)}`,
+    `Payment: ${PAYMENT_LABEL[o.paymentMethod] ?? o.paymentMethod}`,
+    event === "payment_received" ? "Payment status: PAID" : `Status: ${cap(o.status)}`,
   ].join("\n");
 }
 

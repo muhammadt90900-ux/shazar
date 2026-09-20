@@ -9,6 +9,8 @@ import { LIMITS, ORDER_NUMBER_RE, RATE_LIMITS, UUID_RE } from "./limits";
 import { allowRequest } from "@/lib/rate-limit";
 import { notifyOrderEvent, summaryFromAccess } from "@/lib/notifications/dispatch";
 import { normalizeIraqPhone } from "./phone";
+import { availablePaymentMethods } from "@/lib/payments/registry";
+import { startPayment } from "@/lib/payments/service";
 import { validateCustomer } from "./validation";
 import { orderCookieName, ORDER_COOKIE_MAX_AGE } from "./cookie";
 import type {
@@ -20,6 +22,7 @@ import type {
   QuoteResult,
   QuotedLine,
   ShippingCity,
+  CheckoutPaymentMethod,
   TrackResult,
 } from "./types";
 
@@ -199,11 +202,20 @@ export async function quoteCart(rawItems: unknown, rawCity?: unknown): Promise<Q
 }
 
 type RpcResult =
-  | { ok: true; order_number: string; access_token: string; total_iqd: number; replayed: boolean }
+  | {
+      ok: true;
+      order_number: string;
+      access_token: string;
+      total_iqd: number;
+      replayed: boolean;
+      payment_method: CheckoutPaymentMethod;
+      payment_id: string | null;
+    }
   | { ok: false; code: string };
 
 const KNOWN_FAILURES: OrderFailureCode[] = [
   "invalid_city",
+  "invalid_payment_method",
   "rate_limited",
   "invalid_request",
   "invalid_customer",
@@ -241,10 +253,36 @@ export async function placeOrder(raw: PlaceOrderInput): Promise<PlaceOrderResult
     return { ok: false, code: "invalid_customer", fieldErrors: errors };
   }
 
+  // Cash on delivery always; an online method only while it is fully
+  // configured. A request naming anything else is refused here, before
+  // the database is asked for anything.
+  const method = (typeof raw.paymentMethod === "string" ? raw.paymentMethod : "cash_on_delivery") as
+    CheckoutPaymentMethod;
+  if (!["cash_on_delivery", "fastpay", "fib"].includes(method)) {
+    return { ok: false, code: "invalid_payment_method" };
+  }
+  if (method !== "cash_on_delivery" && !availablePaymentMethods().includes(method)) {
+    return { ok: false, code: "payment_unavailable" };
+  }
+
   const expected =
     typeof raw.expectedTotal === "number" && Number.isSafeInteger(raw.expectedTotal) && raw.expectedTotal >= 0
       ? raw.expectedTotal
       : null;
+
+  // A basket for the providers that want one. Names and prices are read
+  // from the database, never from the request.
+  const lineNames = new Map<string, string>();
+  const linePrices = new Map<string, number>();
+  if (method !== "cash_on_delivery") {
+    const quote = await quoteCart(raw.items, raw.customer?.city);
+    if (quote.ok) {
+      for (const line of quote.lines) {
+        if (line.name) lineNames.set(line.lineId, line.name);
+        linePrices.set(line.lineId, line.price);
+      }
+    }
+  }
 
   const { data, error } = await supabase.rpc("place_order", {
     p_idempotency_key: key,
@@ -255,6 +293,7 @@ export async function placeOrder(raw: PlaceOrderInput): Promise<PlaceOrderResult
     p_customer_notes: value.notes,
     p_items: items.map((i) => ({ product_id: i.productId, variant_id: i.variantId, quantity: i.quantity })),
     p_expected_total: expected,
+    p_payment_method: method,
   });
 
   if (error || !data) {
@@ -280,7 +319,9 @@ export async function placeOrder(raw: PlaceOrderInput): Promise<PlaceOrderResult
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    path: "/order",
+    // "/" rather than "/order" since phase 6: the payment pages live
+    // under /payment and need the same proof of ownership
+    path: "/",
     maxAge: ORDER_COOKIE_MAX_AGE,
   });
 
@@ -296,7 +337,41 @@ export async function placeOrder(raw: PlaceOrderInput): Promise<PlaceOrderResult
       summaryFromAccess(order_number, access_token, value.phone)),
   );
 
-  return { ok: true, orderNumber: result.order_number };
+  if (method === "cash_on_delivery") {
+    return { ok: true, orderNumber: order_number, next: `/order/success/${encodeURIComponent(order_number)}` };
+  }
+
+  // Online: the order exists and its stock is held; now ask the provider
+  // to open a payment for exactly the total the database just computed.
+  if (!result.payment_id) {
+    return { ok: false, code: "payment_start_failed" };
+  }
+
+  const started = await startPayment({
+    orderNumber: order_number,
+    accessToken: access_token,
+    paymentId: result.payment_id,
+    method,
+    amountIqd: result.total_iqd,
+    items: items.map((i) => ({
+      name: lineNames.get(i.lineId) ?? "SHAZAR piece",
+      quantity: i.quantity,
+      unitPriceIqd: linePrices.get(i.lineId) ?? 0,
+    })),
+  });
+
+  if (!started.ok) {
+    // startPayment has already released the order and its stock
+    return { ok: false, code: "payment_start_failed" };
+  }
+
+  return {
+    ok: true,
+    orderNumber: order_number,
+    // FastPay hosts the payment page; FIB is paid inside its app, from
+    // the QR on our own pending page
+    next: started.redirectUrl ?? `/payment/pending?order=${encodeURIComponent(order_number)}`,
+  };
 }
 
 type TrackRow = {

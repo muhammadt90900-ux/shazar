@@ -7,6 +7,9 @@ import { OrderStatusForm } from "@/components/admin/OrderStatusForm";
 import { formatIraqPhone, getOrder, type AdminOrderDetail } from "@/lib/admin/orders";
 import { formatPrice } from "@/lib/format";
 import { NotificationLogTable } from "@/components/admin/NotificationLogTable";
+import { getOrderPayments } from "@/lib/admin/payments";
+import { maskReference } from "@/lib/payments/registry";
+import { RecheckButton, ReconcileForm } from "@/components/admin/PaymentControls";
 
 export const metadata = { title: "Order" };
 
@@ -43,6 +46,18 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
 
   const { order: o, items, notifications } = detail;
 
+  // phase 6: the online payment behind this order, if there is one
+  const { payments, events } = o.payment_method === "cash_on_delivery"
+    ? { payments: [], events: [] }
+    : await getOrderPayments(o.id).catch(() => ({ payments: [], events: [] }));
+  const payment = payments[0] ?? null;
+
+  const METHOD_LABEL: Record<string, string> = {
+    cash_on_delivery: "Cash on Delivery",
+    fastpay: "FastPay",
+    fib: "FIB",
+  };
+
   return (
     <div className="admin-shell">
       <AdminNav email={auth.email} />
@@ -74,7 +89,7 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
               <dd>{o.status}</dd>
               <dt>Payment</dt>
               <dd>
-                {o.payment_status} — cash on delivery
+                {o.payment_status} — {METHOD_LABEL[o.payment_method] ?? o.payment_method}
               </dd>
               {o.stock_restored_at && (
                 <>
@@ -176,6 +191,82 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
             today&apos;s rates.
           </p>
         </section>
+
+        {o.payment_method !== "cash_on_delivery" && (
+          <section className="admin-stack">
+            <h2>Payment</h2>
+            {!payment ? (
+              <p className="admin-empty">No payment record for this order.</p>
+            ) : (
+              <>
+                <div className="admin-cols" style={{ alignItems: "start" }}>
+                  <div className="admin-panel admin-grid">
+                    <dl className="admin-dl">
+                      <dt>Provider</dt>
+                      <dd>{METHOD_LABEL[payment.provider] ?? payment.provider}</dd>
+                      <dt>Status</dt>
+                      <dd>
+                        <span className="admin-pill" data-tone={`pay-${payment.status}`}>
+                          {payment.status}
+                        </span>
+                      </dd>
+                      <dt>Amount</dt>
+                      <dd className="num">
+                        {formatPrice(payment.amount_iqd)} {payment.currency}
+                        {payment.amount_iqd !== o.total_iqd && (
+                          <div className="admin-label" style={{ color: "var(--a-danger)" }}>
+                            does not match the order total {formatPrice(o.total_iqd)}
+                          </div>
+                        )}
+                      </dd>
+                      <dt>Reference</dt>
+                      <dd className="num">{maskReference(payment.provider_payment_id ?? payment.provider_reference)}</dd>
+                      <dt>Paid</dt>
+                      <dd>{payment.paid_at ? dateTime(payment.paid_at) : "—"}</dd>
+                      {payment.failure_reason && (
+                        <>
+                          <dt>Reason</dt>
+                          <dd>{payment.failure_reason}</dd>
+                        </>
+                      )}
+                    </dl>
+                  </div>
+                  <div className="admin-stack">
+                    {["pending", "processing"].includes(payment.status) && <RecheckButton id={payment.id} />}
+                    {payment.status !== "paid" && o.status !== "cancelled" && <ReconcileForm id={payment.id} />}
+                  </div>
+                </div>
+
+                <div className="admin-scroll">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th className="num">When</th>
+                        <th>Event</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Detail</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {events.map((e) => (
+                        <tr key={e.id}>
+                          <td className="num admin-label">{dateTime(e.created_at)}</td>
+                          <td>{e.event_type}</td>
+                          <td className="admin-label">{e.previous_status ?? "—"}</td>
+                          <td className="admin-label">{e.new_status ?? "—"}</td>
+                          <td className="admin-label" style={{ maxWidth: 320, overflowWrap: "anywhere" }}>
+                            {e.note ?? (e.amount_iqd != null ? formatPrice(e.amount_iqd) : "—")}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </section>
+        )}
 
         <section className="admin-stack">
           <h2>Notifications</h2>

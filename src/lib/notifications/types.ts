@@ -5,13 +5,17 @@ export type OrderEvent =
   | "order_processing"
   | "order_shipped"
   | "order_delivered"
-  | "order_cancelled";
+  | "order_cancelled"
+  | "payment_received";
 
 /**
  * Which events actually send. The rest are wired end to end — claim,
  * log, dedupe — and switching one on is a one-word change here.
  */
-export const ENABLED_EVENTS: ReadonlySet<OrderEvent> = new Set<OrderEvent>(["order_created"]);
+export const ENABLED_EVENTS: ReadonlySet<OrderEvent> = new Set<OrderEvent>([
+  "order_created",
+  "payment_received",
+]);
 
 export type ProviderName = "telegram" | "whatsapp";
 

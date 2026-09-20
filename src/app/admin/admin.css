@@ -231,3 +231,11 @@
 .admin-pill[data-tone="n-skipped"],
 .admin-pill[data-tone="n-pending"],
 .admin-pill[data-tone="n-none"] { color: var(--a-dim); }
+
+/* ---- phase 6: payments --------------------------------------------- */
+.admin-pill[data-tone="pay-paid"] { border-color: var(--a-green); color: #9db58f; }
+.admin-pill[data-tone="pay-processing"],
+.admin-pill[data-tone="pay-pending"] { color: var(--a-text); }
+.admin-pill[data-tone="pay-failed"] { border-color: var(--a-danger); color: #d99a90; }
+.admin-pill[data-tone="pay-cancelled"],
+.admin-pill[data-tone="pay-expired"] { color: var(--a-dim); opacity: .7; }

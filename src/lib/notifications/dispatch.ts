@@ -27,7 +27,9 @@ import { ENABLED_EVENTS, type OrderEvent, type OrderSummary } from "./types";
 
 type Auth =
   | { kind: "token"; accessToken: string }
-  | { kind: "admin"; client: SupabaseClient<Database> };
+  | { kind: "admin"; client: SupabaseClient<Database> }
+  /** phase 6: the server has just verified a payment with the provider */
+  | { kind: "service"; client: SupabaseClient<Database> };
 
 export async function notifyOrderEvent(
   event: OrderEvent,
@@ -37,20 +39,30 @@ export async function notifyOrderEvent(
 ): Promise<void> {
   if (!ENABLED_EVENTS.has(event)) return;
 
-  const client = auth.kind === "admin" ? auth.client : getSupabaseServerClient();
+  const client = auth.kind === "token" ? getSupabaseServerClient() : auth.client;
   if (!client) return;
   const token = auth.kind === "token" ? auth.accessToken : null;
+  // The service role has no order access token and is not an admin, so it
+  // claims through the payment-specific functions in 0008, which are
+  // granted to it alone. Same log table, same one-row-per-event guard.
+  const viaService = auth.kind === "service";
 
   let summary: OrderSummary | null | undefined;
 
   for (const provider of PROVIDERS) {
     try {
-      const { data, error } = await client.rpc("claim_notification", {
-        p_order_number: orderNumber,
-        p_access_token: token,
-        p_provider: provider.name,
-        p_event: event,
-      });
+      const { data, error } = viaService
+        ? await client.rpc("payment_claim_notification", {
+            p_order_number: orderNumber,
+            p_provider: provider.name,
+            p_event: event,
+          })
+        : await client.rpc("claim_notification", {
+            p_order_number: orderNumber,
+            p_access_token: token,
+            p_provider: provider.name,
+            p_event: event,
+          });
       if (error) {
         console.error(`[notify] claim failed (${provider.name})`, error.code ?? "unknown");
         continue;
@@ -59,13 +71,19 @@ export async function notifyOrderEvent(
       if (claim.result !== "send" || !claim.log_id) continue;
 
       const finish = (status: "sent" | "failed" | "skipped", message: string | null) =>
-        client.rpc("finish_notification", {
-          p_log_id: claim.log_id!,
-          p_order_number: orderNumber,
-          p_access_token: token,
-          p_status: status,
-          p_error: message,
-        });
+        viaService
+          ? client.rpc("payment_finish_notification", {
+              p_log_id: claim.log_id!,
+              p_status: status,
+              p_error: message,
+            })
+          : client.rpc("finish_notification", {
+              p_log_id: claim.log_id!,
+              p_order_number: orderNumber,
+              p_access_token: token,
+              p_status: status,
+              p_error: message,
+            });
 
       if (!provider.configured()) {
         await finish("skipped", "not configured");

@@ -46,6 +46,8 @@ export type QuoteResult =
     }
   | { ok: false; code: "not_configured" | "server_error" | "invalid_request" };
 
+export type CheckoutPaymentMethod = "cash_on_delivery" | "fastpay" | "fib";
+
 export interface PlaceOrderInput {
   idempotencyKey: string;
   customer: {
@@ -58,6 +60,8 @@ export interface PlaceOrderInput {
   items: CartItemInput[];
   /** the total the customer was shown — compared, never charged */
   expectedTotal: number | null;
+  /** cash on delivery, or one of the online providers */
+  paymentMethod: CheckoutPaymentMethod;
 }
 
 export type OrderFailureCode =
@@ -70,10 +74,19 @@ export type OrderFailureCode =
   | "price_changed"
   | "invalid_city"
   | "rate_limited"
+  | "invalid_payment_method"
+  | "payment_unavailable"
+  | "payment_start_failed"
   | "server_error";
 
 export type PlaceOrderResult =
-  | { ok: true; orderNumber: string }
+  | {
+      ok: true;
+      orderNumber: string;
+      /** where to send the customer next: the provider's page, our own
+       *  pending page, or the order confirmation for cash on delivery */
+      next: string;
+    }
   | {
       ok: false;
       code: OrderFailureCode;

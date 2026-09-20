@@ -17,7 +17,7 @@ import {
   type CustomerField,
   type CustomerInput,
 } from "@/lib/checkout/validation";
-import type { QuotedLine, QuoteResult } from "@/lib/checkout/types";
+import type { CheckoutPaymentMethod, QuotedLine, QuoteResult } from "@/lib/checkout/types";
 import { Field, inputClass } from "./Field";
 
 const KEY_STORE = "shazar.checkout.attempt";
@@ -72,7 +72,14 @@ function Bilingual({ text, className = "" }: { text: Bi; className?: string }) {
   );
 }
 
-export function CheckoutClient({ configured }: { configured: boolean }) {
+export function CheckoutClient({
+  configured,
+  methods,
+}: {
+  configured: boolean;
+  /** which methods the server can actually complete right now */
+  methods: CheckoutPaymentMethod[];
+}) {
   const router = useRouter();
   const { lines, ready, applyQuote, clear, remove, setQuantity } = useCart();
 
@@ -83,6 +90,7 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
   const [quoting, setQuoting] = useState(false);
   const [banner, setBanner] = useState<Bi | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [method, setMethod] = useState<CheckoutPaymentMethod>("cash_on_delivery");
   const inFlight = useRef(false);
   const placed = useRef(false);
 
@@ -197,6 +205,7 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
         customer: form,
         items,
         expectedTotal: fresh.total,
+        paymentMethod: method,
       });
 
       if (result.ok) {
@@ -205,7 +214,10 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
           window.sessionStorage.removeItem(KEY_STORE);
         } catch {}
         clear();
-        router.replace(`/order/success/${encodeURIComponent(result.orderNumber)}`);
+        // the server decides where this goes: the provider's own page,
+        // our pending page, or the cash-on-delivery confirmation
+        if (/^https?:\/\//.test(result.next)) window.location.href = result.next;
+        else router.replace(result.next);
         return; // keep the button disabled while the page changes
       }
 
@@ -482,7 +494,8 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
             </p>
           </Field>
 
-          {/* PAYMENT — one method in this phase, shown as a fact, not a choice */}
+          {/* PAYMENT — cash on delivery always; the online methods only
+              while their credentials and callbacks are configured */}
           <div className="border-t border-[var(--rule)] pt-8">
             <div className="flex items-baseline justify-between gap-4">
               <span className="t-ui text-ash">{copy.checkout.payment.en}</span>
@@ -490,18 +503,54 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
                 {copy.checkout.payment.ku}
               </span>
             </div>
-            <div className="mt-4 border border-green px-4 py-4">
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-                <p className="flex items-center gap-3 text-[15px]">
-                  <span aria-hidden="true" className="inline-block h-2.5 w-2.5 bg-green" />
-                  {copy.checkout.cod.en}
-                </p>
-                <p lang="ckb" dir="rtl" className="t-body-ku text-[14px] text-ash">
-                  {copy.checkout.cod.ku}
-                </p>
-              </div>
-              <p className="t-meta mt-2 text-ash">{copy.checkout.codDetail.en}</p>
+            <p className="t-meta mt-2 text-ash">{copy.checkout.choosePayment.en}</p>
+
+            <div role="radiogroup" aria-label={copy.checkout.payment.en} className="mt-4 space-y-3">
+              {methods.map((m) => {
+                const selected = method === m;
+                const label =
+                  m === "cash_on_delivery" ? copy.checkout.cod : m === "fastpay" ? copy.checkout.fastpay : copy.checkout.fib;
+                const detail =
+                  m === "cash_on_delivery"
+                    ? copy.checkout.codDetail
+                    : m === "fastpay"
+                      ? copy.checkout.fastpayDetail
+                      : copy.checkout.fibDetail;
+                return (
+                  <label
+                    key={m}
+                    className={`block cursor-pointer border px-4 py-4 transition-colors duration-200 ${
+                      selected ? "border-green" : "border-[var(--rule)] hover:border-ash"
+                    }`}
+                  >
+                    <span className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                      <span className="flex items-center gap-3 text-[15px]">
+                        <input
+                          type="radio"
+                          name="payment_method"
+                          value={m}
+                          checked={selected}
+                          onChange={() => setMethod(m)}
+                          className="sr-only"
+                        />
+                        <span
+                          aria-hidden="true"
+                          className={`inline-block h-2.5 w-2.5 ${selected ? "bg-green" : "bg-transparent outline outline-1 outline-ash"}`}
+                        />
+                        {label.en}
+                      </span>
+                      <span lang="ckb" dir="rtl" className="t-body-ku text-[14px] text-ash">
+                        {label.ku}
+                      </span>
+                    </span>
+                    <span className="t-meta mt-2 block text-ash">{detail.en}</span>
+                  </label>
+                );
+              })}
             </div>
+            {method !== "cash_on_delivery" && (
+              <p className="t-meta mt-3 text-ash">{copy.checkout.onlineNote.en}</p>
+            )}
           </div>
 
           <div id="co-banner" aria-live="assertive">
@@ -521,7 +570,11 @@ export function CheckoutClient({ configured }: { configured: boolean }) {
               ku={submitting ? copy.checkout.placing.ku : copy.checkout.place.ku}
               className="w-full py-5 text-[13px]"
             >
-              {submitting ? copy.checkout.placing.en : copy.checkout.place.en}
+              {submitting
+                ? method === "cash_on_delivery"
+                  ? copy.checkout.placing.en
+                  : copy.checkout.redirecting.en
+                : copy.checkout.place.en}
             </Button>
             {!quoteCurrent && quoting && (
               <p className="t-meta mt-3 text-center text-ash">{copy.checkout.checking.en}</p>

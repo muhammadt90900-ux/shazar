@@ -150,7 +150,12 @@ export function TrackOrderClient() {
   }
 
   if (order) {
-    const payment = copy.payment[order.paymentStatus] ?? { en: order.paymentStatus, ku: "" };
+    // phase 6: cash on delivery still reads "Pay on delivery" while it
+    // waits; an online payment shows its real state
+    const cod = order.paymentMethod === "cash_on_delivery";
+    const paymentKey = cod && order.paymentStatus === "pending" ? "cod_pending" : order.paymentStatus;
+    const payment = copy.paymentState[paymentKey] ?? { en: order.paymentStatus, ku: "" };
+    const method = copy.methodLabel[order.paymentMethod] ?? { en: order.paymentMethod, ku: "" };
     return (
       <div className="grid gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-20">
         <section aria-labelledby="tr-status">
@@ -183,7 +188,7 @@ export function TrackOrderClient() {
             <div>
               <dt className="t-ui text-ash">{copy.checkout.payment.en}</dt>
               <dd className="mt-3 text-[15px]">
-                {copy.checkout.cod.en}
+                {method.en}
                 <span className="t-meta mt-1 block text-ash">{payment.en}</span>
               </dd>
             </div>

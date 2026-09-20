@@ -29,6 +29,22 @@ export const copy = {
     customer: { en: "Delivery details", ku: "زانیاری گەیاندن" },
     payment: { en: "Payment", ku: "پارەدان" },
     cod: { en: "Cash on Delivery", ku: "پارەدان لە کاتی گەیاندن" },
+    choosePayment: { en: "How would you like to pay?", ku: "چۆن پارە دەدەیت؟" },
+    fastpay: { en: "FastPay", ku: "فاست پەی" },
+    fastpayDetail: {
+      en: "Pay now from your FastPay wallet. You are taken to FastPay and brought back here.",
+      ku: "لە جزدانی فاست‌پەیەوە پارە بدە. دەچیتە فاست‌پەی و دواتر دەگەڕێیتەوە بۆ ئێرە.",
+    },
+    fib: { en: "FIB", ku: "بانکی یەکەمی عێراقی" },
+    fibDetail: {
+      en: "Pay from the FIB app. We show you a QR code and confirm as soon as the bank does.",
+      ku: "لە ئەپی FIBـەوە پارە بدە. کۆدی QRت پیشان دەدەین و هەرکە بانک پشتڕاستی کردەوە دڵنیات دەکەینەوە.",
+    },
+    onlineNote: {
+      en: "Your order is held for 30 minutes while you pay.",
+      ku: "بۆ ماوەی ٣٠ خولەک داواکارییەکەت پارێزراوە تاکو پارە دەدەیت.",
+    },
+    redirecting: { en: "Taking you to payment…", ku: "دەتبەینە لاپەڕەی پارەدان…" },
     codDetail: {
       en: "Nothing is charged now. You pay the courier in cash when your order arrives.",
       ku: "ئێستا هیچ پارەیەک نادەیت. کاتی گەیشتنی داواکارییەکەت پارە بە گەیەنەر دەدەیت.",
@@ -129,6 +145,18 @@ export const copy = {
       en: "Please choose a city from the list — delivery to the one selected is not available right now.",
       ku: "تکایە شارێک لە لیستەکە هەڵبژێرە — گەیاندن بۆ ئەو شارە ئێستا بەردەست نییە.",
     },
+    invalid_payment_method: {
+      en: "Please choose a payment method.",
+      ku: "تکایە شێوازی پارەدان هەڵبژێرە.",
+    },
+    payment_unavailable: {
+      en: "That payment method is not available right now. Please choose another one.",
+      ku: "ئەم شێوازەی پارەدان ئێستا بەردەست نییە. یەکێکی تر هەڵبژێرە.",
+    },
+    payment_start_failed: {
+      en: "We could not start the payment. Nothing was charged and your order was not placed — please try again or choose cash on delivery.",
+      ku: "پارەدان دەستی پێنەکرد. هیچ پارەیەک نەدرا و داواکارییەکەت نەنێردرا — دووبارە هەوڵ بدەرەوە یان پارەدان لە کاتی گەیاندن هەڵبژێرە.",
+    },
     rate_limited: {
       en: "Too many order attempts. Please wait a few minutes and try again.",
       ku: "هەوڵی زۆر درا. تکایە چەند خولەکێک چاوەڕێ بکە و دووبارە هەوڵ بدەرەوە.",
@@ -180,6 +208,63 @@ export const copy = {
     track: { en: "Track order", ku: "بەدواداچوونی داواکاری" },
   },
 
+  payment: {
+    pendingTitle: { en: "Your payment is being verified", ku: "پارەدانەکەت لە پشکنیندایە" },
+    pendingBody: {
+      en: "We have not been told yet that this payment went through. Complete it in your app, then check again.",
+      ku: "هێشتا پێمان ڕانەگەیەنراوە کە پارەکە گەیشتووە. لە ئەپەکەت تەواوی بکە، دواتر دووبارە بپشکنە.",
+    },
+    check: { en: "Check payment status", ku: "پشکنینی دۆخی پارەدان" },
+    checking: { en: "Checking with the provider…", ku: "پشکنین لەگەڵ دابینکەر…" },
+    stillPending: {
+      en: "Still not paid. If you have just paid, wait a few seconds and check again.",
+      ku: "هێشتا پارە نەدراوە. ئەگەر ئێستا پارەت داوە، چەند چرکەیەک چاوەڕێ بکە و دووبارە بپشکنە.",
+    },
+    provider: { en: "Payment provider", ku: "دابینکەری پارەدان" },
+    amount: { en: "Amount", ku: "بڕی پارە" },
+    expiresAt: { en: "Held until", ku: "پارێزراوە تا" },
+    scan: { en: "Scan this with the FIB app", ku: "ئەمە بە ئەپی FIB سکان بکە" },
+    code: { en: "Or enter this code in the app", ku: "یان ئەم کۆدە لە ئەپەکەدا بنووسە" },
+    openApp: { en: "Open the FIB app", ku: "ئەپی FIB بکەرەوە" },
+    successTitle: { en: "Payment received", ku: "پارەکە گەیشت" },
+    successBody: {
+      en: "Thank you — your payment is confirmed and your order is being prepared.",
+      ku: "سوپاس — پارەدانەکەت پشتڕاستکرایەوە و داواکارییەکەت ئامادە دەکرێت.",
+    },
+    failedTitle: { en: "Payment not completed", ku: "پارەدان تەواو نەبوو" },
+    failedBody: {
+      en: "Nothing was charged. Your order was released, so the pieces are back in the shop — you can order again whenever you like.",
+      ku: "هیچ پارەیەک نەدرا. داواکارییەکەت هەڵوەشێنرایەوە و بەرهەمەکان گەڕانەوە فرۆشگا — هەر کاتێک بتەوێت دەتوانیت دووبارە داواکاری بکەیت.",
+    },
+    retry: { en: "Try again", ku: "دووبارە هەوڵ بدەرەوە" },
+    reasonCancelled: { en: "The payment was cancelled.", ku: "پارەدانەکە هەڵوەشێنرایەوە." },
+    reasonExpired: { en: "The payment time ran out.", ku: "کاتی پارەدان تەواو بوو." },
+    reasonDeclined: { en: "The payment was declined.", ku: "پارەدانەکە ڕەتکرایەوە." },
+    notFound: {
+      en: "We cannot show this payment here. For your privacy, it can only be seen on the device that started it.",
+      ku: "ناتوانین ئەم پارەدانە لێرە پیشان بدەین. بۆ پاراستنی تایبەتمەندیت، تەنها لەو ئامێرەی کە دەستی پێکردووە دەبینرێت.",
+    },
+    reference: { en: "Reference", ku: "ژمارەی پەیوەندی" },
+  },
+
+  methodLabel: {
+    cash_on_delivery: { en: "Cash on Delivery", ku: "پارەدان لە کاتی گەیاندن" },
+    fastpay: { en: "FastPay", ku: "فاست پەی" },
+    fib: { en: "FIB", ku: "بانکی یەکەمی عێراقی" },
+  } as Record<string, Bi>,
+
+  /** Payment state as the customer sees it. Cash on delivery reads
+   *  "Pay on delivery" while it waits; everything else is literal. */
+  paymentState: {
+    pending: { en: "Pending", ku: "چاوەڕوان" },
+    cod_pending: { en: "Pay on delivery", ku: "پارەدان لە کاتی گەیاندن" },
+    processing: { en: "Awaiting payment", ku: "چاوەڕێی پارەدان" },
+    paid: { en: "Paid", ku: "پارە دراوە" },
+    failed: { en: "Failed", ku: "سەرنەکەوت" },
+    expired: { en: "Expired", ku: "کاتی بەسەرچووە" },
+    cancelled: { en: "Cancelled", ku: "هەڵوەشێنراوەتەوە" },
+  } as Record<string, Bi>,
+
   track: {
     title: { en: "Track your order", ku: "بەدواداچوونی داواکارییەکەت" },
     intro: {
@@ -225,12 +310,6 @@ export const copy = {
     delivered: { en: "Delivered", ku: "گەیەندرا" },
     cancelled: { en: "Cancelled", ku: "هەڵوەشێنرایەوە" },
   },
-
-  payment: {
-    pending: { en: "Pay on delivery", ku: "پارەدان لە کاتی گەیاندن" },
-    paid: { en: "Paid", ku: "پارە دراوە" },
-    failed: { en: "Payment problem", ku: "کێشەی پارەدان" },
-  } as Record<string, Bi>,
 
   status: {
     pending: { en: "Pending", ku: "چاوەڕوان" },

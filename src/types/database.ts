@@ -96,8 +96,9 @@ export type OrderStatus =
   | "shipped"
   | "delivered"
   | "cancelled";
-export type PaymentStatus = "pending" | "paid" | "failed";
-export type PaymentMethod = "cash_on_delivery";
+export type PaymentStatus = "pending" | "paid" | "failed" | "expired" | "cancelled";
+/** phase 6: two online methods joined cash on delivery */
+export type PaymentMethod = "cash_on_delivery" | "fastpay" | "fib";
 
 /** The columns an admin may read. The checkout secrets (idempotency key,
  *  access salt, token hash) are withheld at column level and are
@@ -135,6 +136,54 @@ export type OrderItemRow = {
   quantity: number;
   line_total_iqd: number;
   image_path_snapshot: string | null;
+  created_at: string;
+};
+
+// ---- phase 6: payments (0008_payments.sql) -------------------------
+
+export type PaymentProviderName = "fastpay" | "fib";
+export type ProviderPaymentStatus =
+  | "pending"
+  | "processing"
+  | "paid"
+  | "failed"
+  | "cancelled"
+  | "expired";
+
+export type PaymentRow = {
+  id: string;
+  order_id: string;
+  provider: PaymentProviderName;
+  provider_payment_id: string | null;
+  provider_reference: string | null;
+  amount_iqd: number;
+  currency: string;
+  status: ProviderPaymentStatus;
+  failure_reason: string | null;
+  checkout_payload: {
+    redirectUrl?: string | null;
+    qrCode?: string | null;
+    readableCode?: string | null;
+    appLinks?: { personal?: string; business?: string; corporate?: string } | null;
+  } | null;
+  expires_at: string | null;
+  paid_at: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PaymentEventRow = {
+  id: string;
+  payment_id: string;
+  provider: PaymentProviderName;
+  event_type: string;
+  previous_status: string | null;
+  new_status: string | null;
+  provider_reference: string | null;
+  amount_iqd: number | null;
+  note: string | null;
+  raw_event_id: string | null;
   created_at: string;
 };
 
@@ -230,6 +279,19 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+      /** Read-only for admins; written only by the 0008 functions. */
+      payments: {
+        Row: PaymentRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      payment_events: {
+        Row: PaymentEventRow;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       shipping_rates: {
         Row: ShippingRateRow;
         Insert: Partial<ShippingRateRow>;
@@ -269,6 +331,7 @@ export interface Database {
           p_customer_notes: string | null;
           p_items: { product_id: string; variant_id: string | null; quantity: number }[];
           p_expected_total: number | null;
+          p_payment_method: string;
         };
         Returns: unknown;
       };
@@ -312,6 +375,68 @@ export interface Database {
       admin_retry_notification: {
         Args: { p_log_id: string };
         Returns: boolean;
+      };
+      // ---- 0008 ----
+      attach_payment_reference: {
+        Args: {
+          p_payment_id: string;
+          p_order_number: string;
+          p_access_token: string;
+          p_provider_payment_id: string | null;
+          p_provider_reference: string | null;
+          p_expires_at: string | null;
+          p_checkout_payload: Record<string, unknown> | null;
+        };
+        Returns: unknown;
+      };
+      abandon_payment: {
+        Args: {
+          p_payment_id: string;
+          p_order_number: string;
+          p_access_token: string;
+          p_reason: string;
+          p_status: string;
+        };
+        Returns: unknown;
+      };
+      payment_view_for_token: {
+        Args: { p_order_number: string; p_access_token: string };
+        Returns: unknown;
+      };
+      /** service role only */
+      settle_payment: {
+        Args: {
+          p_payment_id: string;
+          p_provider: string;
+          p_provider_payment_id: string | null;
+          p_status: string;
+          p_amount_iqd: number | null;
+          p_currency: string;
+          p_reason: string | null;
+          p_raw_event_id: string | null;
+          p_source: string;
+        };
+        Returns: unknown;
+      };
+      log_payment_check: {
+        Args: { p_payment_id: string; p_status: string; p_note: string | null };
+        Returns: undefined;
+      };
+      expire_stale_payments: {
+        Args: { p_limit: number };
+        Returns: unknown;
+      };
+      payment_claim_notification: {
+        Args: { p_order_number: string; p_provider: string; p_event: string };
+        Returns: unknown;
+      };
+      payment_finish_notification: {
+        Args: { p_log_id: string; p_status: string; p_error: string | null };
+        Returns: boolean;
+      };
+      admin_reconcile_payment: {
+        Args: { p_payment_id: string; p_note: string };
+        Returns: unknown;
       };
       admin_log_test_notification: {
         Args: { p_provider: string; p_status: string; p_error: string | null };
