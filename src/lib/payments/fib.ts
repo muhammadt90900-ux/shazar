@@ -39,7 +39,9 @@ const TOKEN_PATH = "/auth/realms/fib-online-shop/protocol/openid-connect/token";
 let token: { value: string; expiresAt: number } | null = null;
 
 function baseUrl(): string {
-  return (env("FIB_API_URL") || "https://fib.stage.fib.iq").replace(/\/+$/, "");
+  // FIB_BASE_URL is the name FIB's own documents use; FIB_API_URL is what
+  // this project shipped with. Either works.
+  return (env("FIB_API_URL") || env("FIB_BASE_URL") || "https://fib.stage.fib.iq").replace(/\/+$/, "");
 }
 
 async function accessToken(): Promise<ProviderResult<string>> {

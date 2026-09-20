@@ -530,6 +530,37 @@ FIB calls `{PAYMENT_CALLBACK_BASE_URL}/api/payments/fib/callback` with
 `{ id, status }` whenever a payment changes; the status in that body is
 ignored and FIB is asked directly.
 
+### Production configuration, in one place
+
+    PAYMENT_CALLBACK_BASE_URL   https://your-domain            (https, no path)
+    SUPABASE_SERVICE_ROLE_KEY   server-only, never NEXT_PUBLIC_
+    FASTPAY_STORE_ID            merchant panel → Store Configuration
+    FASTPAY_STORE_PASSWORD      merchant panel → Store Configuration
+    FASTPAY_ENVIRONMENT         staging | production
+    FASTPAY_API_URL             only if your documents name another host
+    FIB_CLIENT_ID               FIB
+    FIB_CLIENT_SECRET           FIB
+    FIB_API_URL                 https://fib.stage.fib.iq | https://fib.iq
+    PAYMENT_SWEEP_SECRET        protects /api/payments/sweep
+    RATE_LIMIT_SECRET           any long random string
+
+    URLs to register with the providers (ours, not theirs):
+      FastPay IPN      https://your-domain/api/payments/fastpay/ipn
+      FastPay success  https://your-domain/payment/success
+      FastPay cancel   https://your-domain/payment/failed
+      FIB callback     https://your-domain/api/payments/fib/callback
+      FIB redirect     https://your-domain/payment/success
+
+**/admin/payments shows whether each of these is present** — which
+provider is configured, which environment it points at, whether the
+callback base URL and the service-role key are set. It shows presence
+only; no value of any secret is read or displayed.
+
+Callback endpoints take nothing on trust: the body identifies which
+payment it concerns, and the provider is then asked directly. They are
+safe to replay, reject malformed bodies, and never read an amount, a
+currency or a status from the request.
+
 ### Testing a payment
 
 1. Run `0008_payments.sql`, set the environment variables, redeploy.
@@ -607,6 +638,26 @@ FastPay answers HTTP 200 even for failures, with the outcome in the JSON
 `invalid_response`) and a short safe message, so `/admin/payments` shows
 why a payment is not moving. The customer only ever sees a general
 message — never a provider error, a status code or a credential.
+
+### Before going live
+
+    npm test                 unit tests for the status mappers
+    npm run check:payments   talks to the REAL FastPay and FIB sandboxes
+                             with the credentials in your environment,
+                             creates nothing, prints what each provider
+                             answered and how this project classifies it
+
+`check:payments` is the first thing to run the day credentials arrive: it
+verifies the endpoints, the credentials and the status vocabulary without
+touching the database. Anything it marks CHECK is a mapping in
+`fastpay-status.ts` or `fib-status.ts` worth a second look.
+
+Also set before launch: `PAYMENT_CALLBACK_BASE_URL` (an https origin),
+`PAYMENT_SWEEP_SECRET`, `RATE_LIMIT_SECRET`, and a scheduler calling
+`/api/payments/sweep`. Register the callback URLs listed in
+`.env.example` with each provider. Migration `0009_hardening.sql` removes
+write privileges from the anonymous database role and should be run
+before launch.
 
 ### Tests
 

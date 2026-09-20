@@ -50,13 +50,20 @@ const STAGING = "https://staging-apigw-merchant.fast-pay.iq";
 const PRODUCTION = "https://apigw-merchant.fast-pay.iq";
 
 function baseUrl(): string {
-  const explicit = env("FASTPAY_API_URL");
+  // FASTPAY_BASE_URL is the name FastPay's merchant documents use;
+  // FASTPAY_API_URL is what this project shipped with. Either works.
+  const explicit = env("FASTPAY_API_URL") || env("FASTPAY_BASE_URL");
   if (explicit) return explicit.replace(/\/+$/, "");
   return env("FASTPAY_ENVIRONMENT").toLowerCase() === "production" ? PRODUCTION : STAGING;
 }
 
 function credentials() {
-  return { store_id: env("FASTPAY_STORE_ID"), store_password: env("FASTPAY_STORE_PASSWORD") };
+  // FastPay calls these the store id and store password in the merchant
+  // panel; some documents say merchant id / merchant password.
+  return {
+    store_id: env("FASTPAY_STORE_ID") || env("FASTPAY_MERCHANT_ID"),
+    store_password: env("FASTPAY_STORE_PASSWORD") || env("FASTPAY_MERCHANT_PASSWORD"),
+  };
 }
 
 /**
@@ -69,10 +76,17 @@ export const fastpay: PaymentProvider = {
   name: "fastpay",
   label: "FastPay",
 
-  configured: () => Boolean(env("FASTPAY_STORE_ID") && env("FASTPAY_STORE_PASSWORD")),
+  configured: () => {
+    const c = credentials();
+    return Boolean(c.store_id && c.store_password);
+  },
 
   missingEnv() {
-    return ["FASTPAY_STORE_ID", "FASTPAY_STORE_PASSWORD"].filter((k) => !env(k));
+    const c = credentials();
+    return [
+      ...(c.store_id ? [] : ["FASTPAY_STORE_ID"]),
+      ...(c.store_password ? [] : ["FASTPAY_STORE_PASSWORD"]),
+    ];
   },
 
   environment: () => (baseUrl() === PRODUCTION ? "production" : "sandbox"),
